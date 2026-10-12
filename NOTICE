@@ -1,0 +1,25 @@
+pito-embed
+Copyright (c) 2026 Cătălin Ilinca
+
+The code is under the MIT licence in LICENSE. These are the things this
+repository uses or points to that are not its code, where each comes from, and
+what covers it.
+
+The model. pito-embed ships no model weights. src/catalog.rs names the six
+files of EmbeddingGemma-300m in ONNX form, q4 quantised, as published by
+onnx-community at
+https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX, pinned to
+commit 5090578d9565bb06545b4552f76e6bc2c93e4a66 with each file's sha256.
+EmbeddingGemma is Google's model and is provided under and subject to the
+Gemma Terms of Use at https://ai.google.dev/gemma/terms, with the Gemma
+Prohibited Use Policy at https://ai.google.dev/gemma/prohibited_use_policy.
+Whoever downloads and uses the model accepts those terms; they are not
+covered by the MIT licence.
+
+The terminal clip, docs/images/search.gif, was recorded by prec from this
+repository's own shot (render/terminal.toml and render/terminal/search.tape)
+running examples/search.rs, and made a GIF by pconv. It is under the MIT
+licence like the code.
+
+The PITO name and its logos are © Catalin Ilinca, all rights reserved and not
+covered by the MIT licence (TRADEMARKS.md).

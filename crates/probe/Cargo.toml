@@ -1,0 +1,18 @@
+[package]
+name = "probe"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.97"
+description = "System facts for PITO: GPU adapters, disk space, the hardware accelerator and machine detection"
+license = "MIT"
+repository = "https://github.com/gmrdad82/pito-embed"
+homepage = "https://pitomd.com"
+publish = false
+
+[dependencies]
+wgpu = "=27.0.1"
+libc = "0.2"
+pollster = "1.0.1"
+
+[dev-dependencies]
+tempfile = "3"

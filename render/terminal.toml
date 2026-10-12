@@ -1,0 +1,47 @@
+app = "pito-embed"
+bin = "search"
+grid = [90, 16]
+frame = "window"
+prompt = "$ "
+typing = "30ms"
+setup = "sh {app}/render/terminal/models.sh {app} {scratch}/demo"
+
+[build]
+command = "cargo build --release --locked --example search"
+bin_dir = "{target}/release/examples"
+
+[env]
+HOME = "home"
+TMPDIR = "temp"
+NO_COLOR = "1"
+
+[theme]
+name = "Catppuccin Mocha"
+background = "#1e1e2e"
+foreground = "#cdd6f4"
+selection = "#45475a"
+cursor = "#f5e0dc"
+black = "#45475a"
+red = "#f38ba8"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+blue = "#89b4fa"
+magenta = "#f5c2e7"
+cyan = "#94e2d5"
+white = "#bac2de"
+brightBlack = "#585b70"
+brightRed = "#f38ba8"
+brightGreen = "#a6e3a1"
+brightYellow = "#f9e2af"
+brightBlue = "#89b4fa"
+brightMagenta = "#f5c2e7"
+brightCyan = "#94e2d5"
+brightWhite = "#a6adc8"
+
+[shots.search]
+kind = "clip"
+line = "the search example loads EmbeddingGemma-300m on the card the probe picks, embeds eight lines and ranks them against a query by meaning"
+tape = "render/terminal/search.tape"
+launch = 'cd {scratch}/demo && export PATH={bin}:$PATH LD_LIBRARY_PATH={bin} PITO_EMBED_MODELS=model && search() { command search "$@" 2>/dev/null; } && clear'
+settle = "400ms"
+status = "SHIPPED"

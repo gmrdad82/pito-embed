@@ -1,0 +1,36 @@
+[package]
+name = "embed"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.97"
+description = "On-device text embeddings for PITO: EmbeddingGemma-300m through fastembed-rs, on the GPU or the CPU, with no network at inference time"
+license = "MIT"
+repository = "https://github.com/gmrdad82/pito-embed"
+homepage = "https://pitomd.com"
+readme = "README.md"
+publish = false
+
+[workspace]
+members = ["crates/probe"]
+
+[dependencies]
+fastembed = { version = "=5.17.4", default-features = false }
+fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v0.1.2" }
+probe = { path = "crates/probe" }
+thiserror = "2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+ort = { version = "=2.0.0-rc.13" }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+ort = { version = "=2.0.0-rc.13", features = ["directml"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+ort = { version = "=2.0.0-rc.13", features = ["coreml"] }
+
+[features]
+default = ["vulkan"]
+vulkan = ["ort/webgpu"]
