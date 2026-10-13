@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/gmrdad82/pito-embed/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-embed/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-embed)](https://github.com/gmrdad82/pito-embed/tags)
 
-pito-embed turns text into embeddings on your own machine: 768-number vectors where lines that mean the same thing sit close together, so you can search by meaning instead of by words. It runs Google's EmbeddingGemma-300m through [fastembed-rs](https://github.com/Anush008/fastembed-rs) and ONNX Runtime, on the GPU when there is one and on the CPU otherwise, with no network at inference time. It is part of [PITO](https://pitomd.com).
+pito-embed turns text into embeddings on your own machine: 768-number vectors where lines that mean the same thing sit close together, so you can search by meaning instead of by words. It runs Google's EmbeddingGemma-300m through [fastembed-rs](https://github.com/Anush008/fastembed-rs) and ONNX Runtime, on the GPU when there is one and on the CPU otherwise, with no network at inference time. It is part of [PITO MD](https://pitomd.com).
 
 Works on Linux and macOS (Windows through WSL).
 
@@ -86,4 +86,4 @@ Issues are welcome at [github.com/gmrdad82/pito-embed/issues](https://github.com
 
 ## Licence
 
-The code is MIT licensed ([LICENSE](LICENSE)), © Catalin Ilinca. The model is Google's, under the Gemma Terms of Use, and the third-party notices are in [NOTICE](NOTICE). The PITO name and its logos are © Catalin Ilinca, all rights reserved, and are not covered by the MIT licence ([TRADEMARKS.md](TRADEMARKS.md)).
+The code is MIT licensed ([LICENSE](LICENSE)), © Catalin Ilinca. The model is Google's, under the Gemma Terms of Use, and the third-party notices are in [NOTICE](NOTICE). The PITO MD name and its logos are © Catalin Ilinca, all rights reserved, and are not covered by the MIT licence ([TRADEMARKS.md](TRADEMARKS.md)).

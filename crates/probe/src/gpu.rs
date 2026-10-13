@@ -106,7 +106,7 @@ pub fn can_draw_video() -> bool {
             return false;
         }
         let asked = wgpu::DeviceDescriptor {
-            label: Some("PITO screen check"),
+            label: Some("PITO MD screen check"),
             required_features: wgpu::Features::empty(),
             required_limits: wgpu::Limits::downlevel_defaults(),
             memory_hints: wgpu::MemoryHints::default(),
