@@ -40,8 +40,8 @@ It needs Rust 1.97 or newer. The build downloads ONNX Runtime's prebuilt librari
 
 ```toml
 [dependencies]
-embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v0.3.0" }
-probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v0.3.0" }
+embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.0" }
+probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.0" }
 ```
 
 ## Search by meaning
@@ -97,7 +97,7 @@ The clip was recorded while the machine was busy rendering, so its CPU row is sl
 
 ### How it was measured
 
-One run of `examples/bench.rs`, release build, on 2026-10-14: an AMD Radeon RX 9060 XT (16 GB) on Vulkan (Mesa RADV) against an AMD Ryzen 9 9950X (16 cores, 32 threads) with ONNX Runtime's CPU provider, Linux, EmbeddingGemma-300m q4 at the pinned commit, embed 0.3.0. "One query" is the median of 20 single queries; "256 lines" is 16 short lines repeated with a number, in 8 batches of 32. The GPU shared its queue with one other job during the run. The data is [docs/bench/speed.toml](docs/bench/speed.toml), drawn by [pito-compare](https://github.com/gmrdad82/pito-compare). macOS (CoreML) builds and passes CI on the CPU; its GPU path is untested on Apple hardware here.
+One run of `examples/bench.rs`, release build, on 2026-10-14: an AMD Radeon RX 9060 XT (16 GB) on Vulkan (Mesa RADV) against an AMD Ryzen 9 9950X (16 cores, 32 threads) with ONNX Runtime's CPU provider, Linux, EmbeddingGemma-300m q4 at the pinned commit, with the library code of v1.0.0. "One query" is the median of 20 single queries; "256 lines" is 16 short lines repeated with a number, in 8 batches of 32. The GPU shared its queue with one other job during the run. The data is [docs/bench/speed.toml](docs/bench/speed.toml), drawn by [pito-compare](https://github.com/gmrdad82/pito-compare). macOS (CoreML) builds and passes CI on the CPU; its GPU path is untested on Apple hardware here.
 
 ## Know the machine
 
