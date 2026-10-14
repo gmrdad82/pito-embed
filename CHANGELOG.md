@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.0.0 — 2026-10-14
+
+### Added
+
+- `examples/bench.rs` times loading the model, a query and 256 lines on your GPU and on your CPU: on an RX 9060 XT over Vulkan, 256 lines take 477 ms, 6.3× faster than the CPU.
+- `examples/machine.rs` prints what `probe` finds: the system, the card, the best lane for each kind of work, the adapters and the free disk space.
+
+### Changed
+
+- `embed` and `probe` are both 1.0.0; pin them at `tag = "v1.0.0"`.
+- A new README with clips of the search, the bench and the machine probe, and a speed chart.
+- The brand now reads PITO MD.
+
 ## v0.3.0 — 2026-10-12
 
 ### Added
