@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+out=${1:-tmp}
+version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)
+[ -n "$version" ] || { echo "docs-bundle: no version in Cargo.toml" >&2; exit 1; }
+
+mkdir -p "$out"
+out=$(cd "$out" && pwd)
+stage=$(mktemp -d "$out/docs-bundle.XXXXXX")
+trap 'rm -rf "$stage"' EXIT
+docs=$stage/docs
+
+cp -R docs/site "$docs"
+find "$docs" -name '*.md' -exec sed -i.bak "s/@VERSION@/$version/g" {} +
+find "$docs" -name '*.md.bak' -delete
+
+{
+  printf -- '---\ntitle: Changelog\ndescription: What changed in each version of pito-embed.\nsidebar:\n  order: 90\n---\n'
+  sed '1{/^# /d;}' CHANGELOG.md
+} > "$docs/changelog.md"
+
+mkdir -p "$docs/images"
+for image in $(grep -rhoE 'images/[A-Za-z0-9._-]+\.(png|gif|webp)' "$docs" --include='*.md' | sed 's|.*images/||' | sort -u); do
+  [ -f "docs/images/$image" ] || { echo "docs-bundle: docs/images/$image is missing" >&2; exit 1; }
+  grep -q "docs/images/$image" NOTICE || { echo "docs-bundle: NOTICE does not name docs/images/$image" >&2; exit 1; }
+  cp "docs/images/$image" "$docs/images/"
+done
+
+target=${CARGO_TARGET_DIR:-target}
+cargo doc --workspace --no-deps --locked --quiet
+mkdir -p "$docs/api"
+(cd "$target/doc" && tar --exclude=.lock -cf - .) | (cd "$docs/api" && tar -xf -)
+[ -f "$docs/api/embed/index.html" ] && [ -f "$docs/api/probe/index.html" ] || { echo "docs-bundle: cargo doc wrote no embed or probe pages" >&2; exit 1; }
+
+fail=0
+while IFS= read -r page; do
+  dir=$(dirname "$page")
+  head -1 "$page" | grep -qx -- '---' || { echo "docs-bundle: ${page#"$stage/"} has no frontmatter" >&2; fail=1; }
+  for key in 'title:' 'description:' '  order:'; do
+    sed -n '2,/^---$/p' "$page" | grep -q "^$key" || { echo "docs-bundle: ${page#"$stage/"} has no $key" >&2; fail=1; }
+  done
+  for link in $(grep -oE '\]\([^)#]+' "$page" | sed 's/^](//' | grep -vE '^[a-z]+:'); do
+    [ -e "$dir/$link" ] || { echo "docs-bundle: ${page#"$stage/"} links to $link, which is not in the bundle" >&2; fail=1; }
+  done
+done < <(find "$docs" -name '*.md' -not -path "$docs/api/*")
+if grep -rnE '@VERSION@|/home/|/Users/' "$docs" --include='*.md'; then
+  echo "docs-bundle: a page holds a placeholder or a local path" >&2
+  fail=1
+fi
+if grep -rhoE '\]\(https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+' "$docs" --include='*.md' | grep -E 'gmrdad82/' | grep -v 'gmrdad82/pito-embed$'; then
+  echo "docs-bundle: link another repository as https://docs.pitomd.com/<repo>/" >&2
+  fail=1
+fi
+[ "$fail" = 0 ] || exit 1
+
+tarball=$out/docs-v$version.tar.gz
+tar -czf "$tarball" -C "$stage" docs
+echo "$tarball"
