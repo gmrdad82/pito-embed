@@ -24,9 +24,9 @@ by pconv. The chart docs/images/speed-paired.png was drawn by pito-compare
 from docs/bench/speed.toml, the numbers of one run of examples/bench.rs. They
 are under the MIT licence like the code.
 
-The PITO MD mark in assets/marks/pitomd.svg, shown at the README's Licence
-section, is copied by bin/marks from the PITO MD brand masters at
-fe97f221c8c071389283144c416f4fcde87b3958 (assets/marks/SOURCE).
+The PITO MD wordmark in assets/marks/wordmark.svg, shown at the README's
+Licence section, is copied by bin/marks from the PITO MD brand masters at
+aa3aee8b232a1b848995bf3d9a012a01d4aff8ec (assets/marks/SOURCE).
 
 The PITO MD name and its logos are © Catalin Ilinca, all rights reserved and not
 covered by the MIT licence (TRADEMARKS.md).

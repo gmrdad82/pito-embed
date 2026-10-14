@@ -143,6 +143,6 @@ Issues are welcome at [github.com/gmrdad82/pito-embed/issues](https://github.com
 
 ## Licence
 
-<img src="assets/marks/pitomd.svg" width="120" alt="The PITO MD mark">
+<img src="assets/marks/wordmark.svg" width="320" alt="PITO MD">
 
 The code is MIT licensed ([LICENSE](LICENSE)), © Catalin Ilinca. The model is Google's, under the Gemma Terms of Use, and the third-party notices are in [NOTICE](NOTICE). The PITO MD name and its logos are © Catalin Ilinca, all rights reserved, and are not covered by the MIT licence ([TRADEMARKS.md](TRADEMARKS.md)).
