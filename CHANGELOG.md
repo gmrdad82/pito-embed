@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.0.1 — 2026-10-14
+
+### Added
+
+- A docs section for docs.pitomd.com: an overview, install, guides to searching by meaning, getting the model, picking a device, knowing the machine, measuring the speed and shipping a binary, the formats, the API reference and this changelog. Every Release now carries it as `docs-vX.Y.Z.tar.gz`, built by `bin/docs-bundle`.
+
+### Changed
+
+- `embed` and `probe` are both 1.0.1; pin them at `tag = "v1.0.1"`. The library is unchanged.
+
 ## v1.0.0 — 2026-10-14
 
 ### Added
