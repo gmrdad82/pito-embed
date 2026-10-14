@@ -16,10 +16,13 @@ Prohibited Use Policy at https://ai.google.dev/gemma/prohibited_use_policy.
 Whoever downloads and uses the model accepts those terms; they are not
 covered by the MIT licence.
 
-The terminal clip, docs/images/search.gif, was recorded by prec from this
-repository's own shot (render/terminal.toml and render/terminal/search.tape)
-running examples/search.rs, and made a GIF by pconv. It is under the MIT
-licence like the code.
+The terminal clips docs/images/search.gif, docs/images/bench.gif and
+docs/images/machine.gif were recorded by prec from this repository's own
+shots (render/terminal.toml and the tapes in render/terminal/) running
+examples/search.rs, examples/bench.rs and examples/machine.rs, and made GIFs
+by pconv. The chart docs/images/speed-paired.png was drawn by pito-compare
+from docs/bench/speed.toml, the numbers of one run of examples/bench.rs. They
+are under the MIT licence like the code.
 
 The PITO MD name and its logos are © Catalin Ilinca, all rights reserved and not
 covered by the MIT licence (TRADEMARKS.md).

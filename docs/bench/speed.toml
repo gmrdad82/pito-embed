@@ -1,0 +1,30 @@
+title = "EMBEDDINGGEMMA-300M, GPU AGAINST CPU"
+unit = "MILLISECONDS"
+better = "lower"
+subtitle = "RX 9060 XT ON VULKAN, RYZEN 9 9950X, Q4"
+date = "2026-10-14"
+suffix = " MS"
+notes = [
+  "EXAMPLES/BENCH.RS, RELEASE BUILD, ONE RUN.",
+  "QUERY: MEDIAN OF 20. LINES: IN BATCHES OF 32.",
+]
+
+[[parties]]
+name = "VULKAN"
+
+[[parties]]
+name = "CPU"
+
+[[groups]]
+name = "EMBED"
+rows = [
+  { label = "256 LINES", values = [477, 3025] },
+  { label = "ONE QUERY", values = [17, 29] },
+]
+
+[[groups]]
+name = "START"
+rows = [
+  { label = "FIRST QUERY", values = [62, 19] },
+  { label = "LOAD THE MODEL", values = [2781, 1778] },
+]

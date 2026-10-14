@@ -7,7 +7,7 @@ typing = "30ms"
 setup = "sh {app}/render/terminal/models.sh {app} {scratch}/demo"
 
 [build]
-command = "cargo build --release --locked --example search"
+command = "cargo build --release --locked --examples"
 bin_dir = "{target}/release/examples"
 
 [env]
@@ -43,5 +43,21 @@ kind = "clip"
 line = "the search example loads EmbeddingGemma-300m on the card the probe picks, embeds eight lines and ranks them against a query by meaning"
 tape = "render/terminal/search.tape"
 launch = 'cd {scratch}/demo && export PATH={bin}:$PATH LD_LIBRARY_PATH={bin} PITO_EMBED_MODELS=model && search() { command search "$@" 2>/dev/null; } && clear'
+settle = "400ms"
+status = "SHIPPED"
+
+[shots.bench]
+kind = "clip"
+line = "the bench example loads EmbeddingGemma-300m on the card and on the processor and times a query and 256 lines on each"
+tape = "render/terminal/bench.tape"
+launch = 'cd {scratch}/demo && export PATH={bin}:$PATH LD_LIBRARY_PATH={bin} PITO_EMBED_MODELS=model && bench() { command bench "$@" 2>/dev/null; } && clear'
+settle = "400ms"
+status = "SHIPPED"
+
+[shots.machine]
+kind = "clip"
+line = "the machine example prints what probe finds: the system, the card, the best lane for each kind of work, the adapters and the disk"
+tape = "render/terminal/machine.tape"
+launch = 'cd {scratch}/demo && export PATH={bin}:$PATH && machine() { command machine "$@" 2>/dev/null; } && clear'
 settle = "400ms"
 status = "SHIPPED"

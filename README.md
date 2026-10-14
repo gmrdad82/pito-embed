@@ -4,29 +4,39 @@
 
 [![CI](https://github.com/gmrdad82/pito-embed/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-embed/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-embed)](https://github.com/gmrdad82/pito-embed/tags)
 
-pito-embed turns text into embeddings on your own machine: 768-number vectors where lines that mean the same thing sit close together, so you can search by meaning instead of by words. It runs Google's EmbeddingGemma-300m through [fastembed-rs](https://github.com/Anush008/fastembed-rs) and ONNX Runtime, on the GPU when there is one and on the CPU otherwise, with no network at inference time. It is part of [PITO MD](https://pitomd.com).
+pito-embed turns text into embeddings on your own machine, in Rust: 768-number vectors where lines that mean the same thing sit close together, so you search by meaning instead of by words. It runs Google's EmbeddingGemma-300m on the GPU when there is one and on the CPU otherwise, with no network at inference time. Part of [PITO MD](https://pitomd.com).
+
+- **6.3× faster on the GPU:** 256 lines embedded in 477 ms on Vulkan (536 lines a second) against 3,025 ms on the CPU, and one query in 17 ms against 29 ms ([how it was measured](#how-it-was-measured)).
+- **Three calls:** `Embedder::load`, `embed_documents`, `embed_query`. Vectors come back unit length, so a dot product is the cosine similarity.
+- **Picks the device for you:** the `probe` crate finds the card and the best lane for the work; if the GPU refuses the model, it runs on the CPU and tells you why.
+- **Offline and pinned:** the model (219 MB, q4) is read from a folder you give it, every file pinned to one upstream commit and its sha256; the library never downloads anything itself.
+- **Small:** 1,218 lines of Rust across the two crates, unit tests included; 5 direct dependencies for `embed`, 3 for `probe`.
 
 Works on Linux and macOS (Windows through WSL).
 
-## What it is
+## Install and first use
 
-A Cargo workspace of two Rust crates:
+Clone it and run the example: it downloads the model once (219 MB, sha256 checked), loads it on your GPU and ranks eight lines against your query.
 
-- **`embed`**, at the root: the embedder. `Embedder::load` opens the model from a folder on the device you ask for, `embed_query` and `embed_documents` return unit-length vectors (so a dot product is the cosine similarity), with EmbeddingGemma's query and document prompts applied for you. When the GPU refuses the model it falls back to the CPU and tells you why. `embed::catalog()` lists the six model files with their download URLs, sizes and sha256.
-- **`probe`**, in `crates/probe`: facts about the machine: the GPU adapters (through wgpu), free disk space, the hardware video accelerator and a summary of the machine with the best execution lane for each kind of work. `embed` reads it to pick a device.
+**Linux** (Debian and Ubuntu; other distributions need the same three packages):
 
-The devices:
+```sh
+sudo apt-get install -y build-essential pkg-config libssl-dev
+git clone https://github.com/gmrdad82/pito-embed && cd pito-embed
+cargo run --release --example search -- a hidden area
+```
 
-| OS | GPU | Fallback |
-| --- | --- | --- |
-| Linux | ONNX Runtime's WebGPU provider over Vulkan (the default `vulkan` feature) | CPU |
-| macOS | CoreML | CPU |
+**macOS** (Xcode's command line tools):
 
-On the machine in the clip (an AMD card on Linux, Vulkan), the model loads in about 0.9 s and eight short lines plus a query embed in 45 to 90 ms.
+```sh
+xcode-select --install
+git clone https://github.com/gmrdad82/pito-embed && cd pito-embed
+cargo run --release --example search -- a hidden area
+```
 
-## Install
+**Windows:** run the Linux lines inside WSL.
 
-pito-embed isn't on crates.io; add it from this repository, pinned to a tag. Both crates come from the one repository, and a project that uses both pins them at the same tag:
+It needs Rust 1.97 or newer. The build downloads ONNX Runtime's prebuilt libraries through the [`ort`](https://github.com/pykeio/ort) crate. Then add it to your project, pinned to a tag (it isn't on crates.io; both crates come from this repository and pin the same tag):
 
 ```toml
 [dependencies]
@@ -34,13 +44,9 @@ embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v0.3.0" }
 probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v0.3.0" }
 ```
 
-It needs Rust 1.97 or newer. The build downloads ONNX Runtime's prebuilt libraries through the [`ort`](https://github.com/pykeio/ort) crate.
+## Search by meaning
 
-- **Linux:** a C toolchain, `pkg-config` and OpenSSL's headers (`build-essential pkg-config libssl-dev` on Debian and Ubuntu). The GPU build links ONNX Runtime's `libwebgpu_dawn.so`, which `ort` places next to your binary in `target/<profile>/`; `cargo run` and `cargo test` find it, and a binary you ship carries it alongside (with an rpath of `$ORIGIN`, or `LD_LIBRARY_PATH`). For a CPU-only build without it, turn off the default features: `embed = { …, default-features = false }`.
-- **macOS:** Xcode's command line tools. CoreML comes with the system.
-- **Windows:** run it under WSL, as on Linux.
-
-## Use
+The clip at the top is `examples/search.rs`. The whole of it that matters:
 
 ```rust
 use embed::{EmbedDevice, Embedder};
@@ -54,21 +60,68 @@ let query = embedder.embed_query("a hidden area")?;
 let score: f32 = query.iter().zip(&docs[0]).map(|(a, b)| a * b).sum();
 ```
 
-`embedder.device_in_use()` says where it runs, and `embedder.fall_off_reason()` says why, when the GPU refused and it fell back to the CPU. Errors are `EmbedError`: the model missing (with the file's path), the GPU unavailable, the model failing to load, or inference failing.
+```text
+loaded EmbeddingGemma-300m on Vulkan in 1613 ms
+embedded 8 lines and the query in 110 ms, 768 dimensions each
 
-### The model
+query: a hidden area
+  0.567  found a secret room behind the waterfall
+  0.295  we finally beat the final boss on hard
+  0.289  the soundtrack in this level is incredible
+```
+
+"a hidden area" shares no word with "a secret room behind the waterfall", and it still ranks first. EmbeddingGemma's query and document prompts are applied for you. Errors are `EmbedError`: the model missing (with the file's path), the GPU unavailable, the model failing to load, or inference failing.
+
+## Fast on the GPU, safe on the CPU
+
+![Paired bars, lower is better: 256 lines take 477 ms on Vulkan against 3025 ms on the CPU, 6.3 times faster; one query 17 ms against 29 ms, 1.7 times faster; the first query 62 ms against 19 ms and loading the model 2781 ms against 1778 ms, slower on the GPU](docs/images/speed-paired.png)
+
+Batches are where the card pays: 6.3× the CPU on 256 lines. A single query is 1.7× faster. Loading the model and the first query cost more on the GPU, since its shaders are set up then, so load once and keep the `Embedder`.
+
+| OS | GPU | Fallback |
+| --- | --- | --- |
+| Linux | ONNX Runtime's WebGPU provider over Vulkan (the default `vulkan` feature) | CPU |
+| macOS | CoreML | CPU |
+
+When the card refuses the model, `Embedder::load` loads it on the CPU instead; `device_in_use()` says where it runs and `fall_off_reason()` says why. For a CPU-only build, turn off the default features: `embed = { …, default-features = false }`.
+
+<p align="center"><img src="docs/images/bench.gif" width="800" alt="A terminal running the bench example: it loads EmbeddingGemma-300m on Vulkan and on the processor and prints, for each, the load time, the first query, the median query, the time for 256 lines and lines per second; Vulkan does 532 lines a second."></p>
+
+`examples/bench.rs` prints the table above for your own machine:
+
+```sh
+PITO_EMBED_MODELS=<the model's folder> cargo run --release --example bench
+```
+
+The clip was recorded while the machine was busy rendering, so its CPU row is slower than the chart's; the chart is the quiet run.
+
+### How it was measured
+
+One run of `examples/bench.rs`, release build, on 2026-10-14: an AMD Radeon RX 9060 XT (16 GB) on Vulkan (Mesa RADV) against an AMD Ryzen 9 9950X (16 cores, 32 threads) with ONNX Runtime's CPU provider, Linux, EmbeddingGemma-300m q4 at the pinned commit, embed 0.3.0. "One query" is the median of 20 single queries; "256 lines" is 16 short lines repeated with a number, in 8 batches of 32. The GPU shared its queue with one other job during the run. The data is [docs/bench/speed.toml](docs/bench/speed.toml), drawn by [pito-compare](https://github.com/gmrdad82/pito-compare). macOS (CoreML) builds and passes CI on the CPU; its GPU path is untested on Apple hardware here.
+
+## Know the machine
+
+<p align="center"><img src="docs/images/machine.gif" width="800" alt="A terminal running the machine example: Omarchy system information, Linux with AMD Vulkan, RX 9060 XT 16 GB, 24 cores, 62 GB; the best lane for embeddings is WebGPU, for speech Vulkan, for video VAAPI; the adapters are the AMD Radeon RX 9060 XT on Vulkan and llvmpipe; the free disk space."></p>
+
+The `probe` crate answers what a program needs before it picks a device: the system, the card and its memory, the cores and RAM, the best execution lane for each kind of work (embeddings, speech, video), every graphics adapter (through wgpu) and the free disk space. `embed` reads it to pick a device. The clip is `examples/machine.rs`:
+
+```rust
+let machine = probe::probe_machine();
+println!("{}", machine.headline());
+println!("{}", machine.spec_line());
+println!("embeddings  {}", machine.filing.label());
+let disk = probe::probe_disk(std::path::Path::new("."));
+```
+
+## The model, pinned
 
 The library reads the model from a folder you give it and never downloads anything itself. `embed::catalog()` lists what that folder holds: EmbeddingGemma-300m in ONNX, q4 quantised (about 219 MB in all), from [onnx-community/embeddinggemma-300m-ONNX](https://huggingface.co/onnx-community/embeddinggemma-300m-ONNX) on Hugging Face, pinned to one commit, with each file's size and sha256. Each entry is a `fetch::FetchSpec` from [pito-fetch](https://github.com/gmrdad82/pito-fetch), which downloads it resumably and checks the hash; any downloader works, as long as it checks the sha256.
 
+The examples keep the model in `$XDG_DATA_HOME/pito-embed/embeddinggemma-300m-q4` (`~/.local/share/…` when that isn't set) on Linux and `~/Library/Application Support/pito-embed/embeddinggemma-300m-q4` on macOS, or in the folder `PITO_EMBED_MODELS` names.
+
+On Linux the GPU build links ONNX Runtime's `libwebgpu_dawn.so` (12 MB), which `ort` places next to your binary in `target/<profile>/`; `cargo run` and `cargo test` find it, and a binary you ship carries it alongside (with an rpath of `$ORIGIN`, or `LD_LIBRARY_PATH`). The search example builds to 47 MB in release, ONNX Runtime included.
+
 EmbeddingGemma is Google's model, provided under and subject to the [Gemma Terms of Use](https://ai.google.dev/gemma/terms) and the [Gemma Prohibited Use Policy](https://ai.google.dev/gemma/prohibited_use_policy). pito-embed ships no weights; whoever downloads and uses the model accepts those terms, which the MIT licence here doesn't cover.
-
-### The example
-
-`examples/search.rs` is the program in the clip. It downloads the model the first time, into `$XDG_DATA_HOME/pito-embed/embeddinggemma-300m-q4` (`~/.local/share/…` when that isn't set) on Linux and `~/Library/Application Support/pito-embed/embeddinggemma-300m-q4` on macOS, or into the folder `PITO_EMBED_MODELS` names. Then it loads the model on the device the probe picks, embeds eight lines and ranks them against your query:
-
-```sh
-cargo run --release --example search -- a hidden area
-```
 
 ## Build and test
 
@@ -78,11 +131,15 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to the model's folder (running the example once fills the default one). Without it they say so and skip. CI runs all of it on Linux and macOS, with the model, on the CPU, since the runners have no GPU; the GPU paths run on the maintainer's machine.
+The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to the model's folder (running the search example once fills the default one). Without it they say so and skip. CI runs all of it on Linux and macOS, with the model, on the CPU, since the runners have no GPU; the GPU paths run on the maintainer's machine.
+
+## Part of PITO MD
+
+pito-embed is one of the open building blocks of [PITO MD](https://pitomd.com). It downloads its model with [pito-fetch](https://github.com/gmrdad82/pito-fetch), and its clips and charts are made with [prec](https://github.com/gmrdad82/prec), [pconv](https://github.com/gmrdad82/pconv) and [pito-compare](https://github.com/gmrdad82/pito-compare).
 
 ## Contributing
 
-Issues are welcome at [github.com/gmrdad82/pito-embed/issues](https://github.com/gmrdad82/pito-embed/issues): a machine where the GPU isn't picked or falls back when it shouldn't (with what `probe::probe_machine()` reports), a load or inference error, or results that look wrong. Pull requests aren't taken. Please read the [code of conduct](CODE_OF_CONDUCT.md) first, and report security issues privately, as [SECURITY.md](SECURITY.md) describes.
+Issues are welcome at [github.com/gmrdad82/pito-embed/issues](https://github.com/gmrdad82/pito-embed/issues): a machine where the GPU isn't picked or falls back when it shouldn't (with what `examples/machine.rs` prints), a load or inference error, or results that look wrong. Pull requests aren't taken. Please read the [code of conduct](CODE_OF_CONDUCT.md) first, and report security issues privately, as [SECURITY.md](SECURITY.md) describes.
 
 ## Licence
 
