@@ -47,7 +47,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@89b12181fb390509a0842a86cc55eeb8eb928c1d
         with:
           toolchain: 1.97.1
-      - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
+      - uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9
         with:
           path: |
             ~/.cargo/registry/index
@@ -55,7 +55,9 @@ jobs:
             ~/.cargo/git/db
             target
           key: release-docs-rust-1.97.1-${{ hashFiles('Cargo.lock') }}
-          restore-keys: release-docs-rust-1.97.1-
+          restore-keys: |
+            release-docs-rust-1.97.1-
+            ubuntu-24.04-rust-1.97.1-
       - name: docs bundle
         run: bin/docs-bundle dist
       - name: release
