@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.2 — 2026-10-16
+
+### Changed
+
+- The model download example and guide use pito-fetch v1.0.1.
+- The README's install lines pin v1.0.2, and its Licence section shows the PITO MD wordmark.
+- CI saves its caches from main only.
+
 ## v1.0.1 — 2026-10-14
 
 ### Added
