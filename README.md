@@ -135,7 +135,7 @@ The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to th
 
 ## Part of PITO MD
 
-pito-embed is one of the open building blocks of [PITO MD](https://pitomd.com). It downloads its model with [pito-fetch](https://github.com/gmrdad82/pito-fetch), and its clips and charts are made with [prec](https://github.com/gmrdad82/prec), [pconv](https://github.com/gmrdad82/pconv) and [pito-compare](https://github.com/gmrdad82/pito-compare).
+pito-embed is one of the open building blocks of [PITO MD](https://pitomd.com). It downloads its model with [pito-fetch](https://github.com/gmrdad82/pito-fetch), and its clips and charts are made with [prec](https://github.com/gmrdad82/prec), [pcod](https://github.com/gmrdad82/pito-codecs) and [pito-compare](https://github.com/gmrdad82/pito-compare).
 
 ## Contributing
 
