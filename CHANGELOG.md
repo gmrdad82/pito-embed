@@ -1,5 +1,13 @@
 # Changelog
 
+## v1.0.3 — 2026-10-16
+
+### Changed
+
+- The model downloader pito-fetch moves to v1.0.2.
+- The README's install lines point at v1.0.3.
+- The README and NOTICE credit pcod (pito-codecs) for the clips.
+
 ## v1.0.2 — 2026-10-16
 
 ### Changed
