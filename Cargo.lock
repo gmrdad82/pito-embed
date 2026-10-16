@@ -460,8 +460,8 @@ checksum = "da7c62ceae207dd37ea5b845da6a0696c799f85e97da1ab5b7910be3c1c80223"
 
 [[package]]
 name = "fetch"
-version = "1.0.1"
-source = "git+https://github.com/gmrdad82/pito-fetch.git?tag=v1.0.1#bb5e6dba1c7b27242d83d6f79914ae9855060244"
+version = "1.0.2"
+source = "git+https://github.com/gmrdad82/pito-fetch.git?tag=v1.0.2#6b24d99cfdac65dedc8377109ee091fd487f373e"
 dependencies = [
  "sha2",
  "thiserror 2.0.21",
