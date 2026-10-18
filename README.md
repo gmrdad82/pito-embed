@@ -2,7 +2,7 @@
 
 # pito-embed
 
-[![CI](https://github.com/gmrdad82/pito-embed/actions/workflows/ci.yml/badge.svg)](https://github.com/gmrdad82/pito-embed/actions/workflows/ci.yml) [![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-embed)](https://github.com/gmrdad82/pito-embed/tags)
+[![Version](https://img.shields.io/github/v/tag/gmrdad82/pito-embed)](https://github.com/gmrdad82/pito-embed/tags)
 
 pito-embed turns text into embeddings on your own machine, in Rust: 768-number vectors where lines that mean the same thing sit close together, so you search by meaning instead of by words. It runs Google's EmbeddingGemma-300m on the GPU when there is one and on the CPU otherwise, with no network at inference time. Part of [PITO MD](https://pitomd.com).
 
@@ -97,7 +97,7 @@ The clip was recorded while the machine was busy rendering, so its CPU row is sl
 
 ### How it was measured
 
-One run of `examples/bench.rs`, release build, on 2026-10-14: an AMD Radeon RX 9060 XT (16 GB) on Vulkan (Mesa RADV) against an AMD Ryzen 9 9950X (16 cores, 32 threads) with ONNX Runtime's CPU provider, Linux, EmbeddingGemma-300m q4 at the pinned commit, with the library code of v1.0.0. "One query" is the median of 20 single queries; "256 lines" is 16 short lines repeated with a number, in 8 batches of 32. The GPU shared its queue with one other job during the run. The data is [docs/bench/speed.toml](docs/bench/speed.toml), drawn by [pito-compare](https://github.com/gmrdad82/pito-compare). macOS (CoreML) builds and passes CI on the CPU; its GPU path is untested on Apple hardware here.
+One run of `examples/bench.rs`, release build, on 2026-10-14: an AMD Radeon RX 9060 XT (16 GB) on Vulkan (Mesa RADV) against an AMD Ryzen 9 9950X (16 cores, 32 threads) with ONNX Runtime's CPU provider, Linux, EmbeddingGemma-300m q4 at the pinned commit, with the library code of v1.0.0. "One query" is the median of 20 single queries; "256 lines" is 16 short lines repeated with a number, in 8 batches of 32. The GPU shared its queue with one other job during the run. The data is [docs/bench/speed.toml](docs/bench/speed.toml), drawn by [pito-compare](https://github.com/gmrdad82/pito-compare). macOS (CoreML) builds and passes its tests on the CPU; its GPU path is untested on Apple hardware here.
 
 ## Know the machine
 
@@ -131,7 +131,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
 
-The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to the model's folder (running the search example once fills the default one). Without it they say so and skip. CI runs all of it on Linux and macOS, with the model, on the CPU, since the runners have no GPU; the GPU paths run on the maintainer's machine.
+The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to the model's folder (running the search example once fills the default one). Without it they say so and skip. The maintainer runs all of it, with the model, on Linux and macOS before every release, and the GPU paths on a machine with a GPU.
 
 ## Part of PITO MD
 

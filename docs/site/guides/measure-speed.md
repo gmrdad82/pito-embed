@@ -41,4 +41,4 @@ The clip was recorded while the machine was busy rendering, so its CPU row is sl
 
 One run of `examples/bench.rs`, release build, on 2026-10-14: an AMD Radeon RX 9060 XT (16 GB) on Vulkan (Mesa RADV) against an AMD Ryzen 9 9950X (16 cores, 32 threads) with ONNX Runtime's CPU provider, Linux, EmbeddingGemma-300m q4 at the pinned commit, with the library code of v1.0.0. The GPU shared its queue with one other job during the run. 256 lines took 477 ms on Vulkan (536 lines a second) against 3,025 ms on the CPU, 6.3× faster; one query 17 ms against 29 ms. The chart was drawn by [pito-compare](https://docs.pitomd.com/pito-compare/).
 
-macOS (CoreML) builds and passes CI on the CPU; its GPU path is untested on Apple hardware here.
+macOS (CoreML) builds and passes its tests on the CPU; its GPU path is untested on Apple hardware here.

@@ -52,4 +52,4 @@ embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v@VERSION@"
 
 Batches are where the card pays: 256 lines run 6.3× faster on Vulkan than on the CPU, one query 1.7×. Loading the model and the first query cost more on the GPU, since its shaders are set up then, so load once and keep the `Embedder`. [Measure the speed](measure-speed.md) has the numbers and how to get yours.
 
-The macOS CoreML path builds and passes CI on the CPU; it is untested on Apple hardware here.
+The macOS CoreML path builds and passes its tests on the CPU; it is untested on Apple hardware here.
