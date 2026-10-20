@@ -14,6 +14,8 @@ pito-embed turns text into embeddings on your own machine, in Rust: 768-number v
 
 Works on Linux and macOS (Windows through WSL).
 
+Got questions or doubts? Ping me on Discord: https://discord.gg/XsNcn3kYzn
+
 ## Install and first use
 
 Clone it and run the example: it downloads the model once (219 MB, sha256 checked), loads it on your GPU and ranks eight lines against your query.
