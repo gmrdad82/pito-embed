@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use fastembed::{
@@ -46,14 +46,26 @@ impl Embedder {
 
     fn load_on(model_dir: &Path, device: EmbedDevice) -> Result<Self, EmbedError> {
         let _webgpu = webgpu_session(device);
-        let onnx_file = read_required(&model_dir.join("onnx").join(ONNX_FILE))?;
-        let onnx_data = read_required(&model_dir.join("onnx").join(ONNX_DATA_FILE))?;
-        let tokenizer_file = read_required(&model_dir.join("tokenizer.json"))?;
-        let config_file = read_required(&model_dir.join("config.json"))?;
-        let special_tokens_map_file = read_required(&model_dir.join("special_tokens_map.json"))?;
-        let tokenizer_config_file = read_required(&model_dir.join("tokenizer_config.json"))?;
+        let [
+            onnx_path,
+            onnx_data_path,
+            tokenizer_path,
+            config_path,
+            special_tokens_map_path,
+            tokenizer_config_path,
+        ] = required_paths(model_dir);
+        for path in required_paths(model_dir) {
+            check_required(&path)?;
+        }
 
         ensure_provider_available(device)?;
+
+        let onnx_file = read_required(&onnx_path)?;
+        let onnx_data = read_required(&onnx_data_path)?;
+        let tokenizer_file = read_required(&tokenizer_path)?;
+        let config_file = read_required(&config_path)?;
+        let special_tokens_map_file = read_required(&special_tokens_map_path)?;
+        let tokenizer_config_file = read_required(&tokenizer_config_path)?;
 
         let mut model = UserDefinedEmbeddingModel::new(
             onnx_file,
@@ -140,10 +152,43 @@ fn prefixed_document(text: &str) -> String {
     format!("{DOC_PREFIX}{text}")
 }
 
+fn required_paths(model_dir: &Path) -> [PathBuf; 6] {
+    let onnx = model_dir.join("onnx");
+    [
+        onnx.join(ONNX_FILE),
+        onnx.join(ONNX_DATA_FILE),
+        model_dir.join("tokenizer.json"),
+        model_dir.join("config.json"),
+        model_dir.join("special_tokens_map.json"),
+        model_dir.join("tokenizer_config.json"),
+    ]
+}
+
+fn check_required(path: &Path) -> Result<(), EmbedError> {
+    let meta = std::fs::metadata(path).map_err(|e| required_err(path, e))?;
+    if meta.is_file() {
+        Ok(())
+    } else {
+        Err(EmbedError::LoadFailed {
+            detail: format!("{} is not a file", path.display()),
+        })
+    }
+}
+
 fn read_required(path: &Path) -> Result<Vec<u8>, EmbedError> {
-    std::fs::read(path).map_err(|_| EmbedError::ModelMissing {
-        path: path.to_path_buf(),
-    })
+    std::fs::read(path).map_err(|e| required_err(path, e))
+}
+
+fn required_err(path: &Path, e: std::io::Error) -> EmbedError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        EmbedError::ModelMissing {
+            path: path.to_path_buf(),
+        }
+    } else {
+        EmbedError::LoadFailed {
+            detail: tail_capped(format!("{}: {e}", path.display())),
+        }
+    }
 }
 
 fn providers(device: EmbedDevice) -> Result<Vec<ort::ep::ExecutionProviderDispatch>, EmbedError> {
@@ -196,12 +241,16 @@ fn inference_err(e: fastembed::Error) -> EmbedError {
 }
 
 fn normalize(v: &[f32]) -> Vec<f32> {
-    let n = v.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if n > 0.0 {
-        v.iter().map(|x| x / n).collect()
-    } else {
-        v.to_vec()
+    if v.iter().any(|x| !x.is_finite()) {
+        return v.to_vec();
     }
+    let scale = v.iter().fold(0.0_f32, |m, x| m.max(x.abs()));
+    if scale <= 0.0 {
+        return v.to_vec();
+    }
+    let n = v.iter().map(|x| (x / scale).powi(2)).sum::<f32>().sqrt();
+    let k = 1.0 / n;
+    v.iter().map(|x| x / scale * k).collect()
 }
 
 #[cfg(test)]
@@ -244,6 +293,173 @@ mod tests {
         let n = normalize(&v);
         assert_eq!(n, v);
         assert!(n.iter().all(|x| x.is_finite()));
+    }
+
+    fn assert_unit_and_parallel(input: &[f32], out: &[f32]) {
+        assert_eq!(out.len(), input.len());
+        let mag = out
+            .iter()
+            .map(|x| f64::from(*x).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        assert!((mag - 1.0).abs() < 1e-5, "magnitude {mag} for {input:?}");
+        for (x, y) in input.iter().zip(out) {
+            assert!(y.is_finite(), "{out:?}");
+            assert_eq!(x.signum(), y.signum(), "{input:?} -> {out:?}");
+        }
+        let in_mag = input
+            .iter()
+            .map(|x| f64::from(*x).powi(2))
+            .sum::<f64>()
+            .sqrt();
+        for (x, y) in input.iter().zip(out) {
+            assert!((f64::from(*x) / in_mag - f64::from(*y)).abs() < 1e-5);
+        }
+    }
+
+    #[test]
+    fn normalize_keeps_the_direction_of_negative_vectors() {
+        let v = [-3.0_f32, -4.0];
+        let n = normalize(&v);
+        assert_eq!(n, vec![-0.6, -0.8]);
+        assert_unit_and_parallel(&v, &n);
+        let mixed = [-1.0_f32, 2.0, -2.0];
+        assert_unit_and_parallel(&mixed, &normalize(&mixed));
+    }
+
+    #[test]
+    fn normalize_scales_tiny_vectors_whose_squares_underflow_up_to_unit_length() {
+        let v = [1e-30_f32, -1e-30, 2e-30];
+        assert_eq!(v[0] * v[0], 0.0);
+        assert_unit_and_parallel(&v, &normalize(&v));
+    }
+
+    #[test]
+    fn normalize_scales_huge_vectors_whose_squares_overflow_down_to_unit_length() {
+        let v = [3e30_f32, -4e30];
+        assert!((v[0] * v[0]).is_infinite());
+        assert_unit_and_parallel(&v, &normalize(&v));
+    }
+
+    #[test]
+    fn normalize_reaches_unit_length_at_the_ends_of_the_f32_range() {
+        let largest = [f32::MAX, -f32::MAX, f32::MAX];
+        assert_unit_and_parallel(&largest, &normalize(&largest));
+        let smallest = [f32::from_bits(1), -f32::from_bits(1)];
+        assert_unit_and_parallel(&smallest, &normalize(&smallest));
+    }
+
+    #[test]
+    fn normalize_turns_a_single_element_into_its_sign() {
+        assert_eq!(normalize(&[0.25]), vec![1.0]);
+        assert_eq!(normalize(&[-5.0]), vec![-1.0]);
+        assert_eq!(normalize(&[0.0]), vec![0.0]);
+    }
+
+    #[test]
+    fn normalize_returns_a_vector_with_an_infinity_unchanged() {
+        let v = vec![f32::INFINITY, 1.0, -2.0];
+        assert_eq!(normalize(&v), v);
+        let v = vec![1.0, f32::NEG_INFINITY];
+        assert_eq!(normalize(&v), v);
+    }
+
+    #[test]
+    fn normalize_returns_a_vector_with_a_nan_unchanged_and_spreads_no_nan() {
+        let v = vec![3.0_f32, f32::NAN, 4.0];
+        let n = normalize(&v);
+        assert_eq!(n.len(), 3);
+        assert_eq!(n[0], 3.0);
+        assert!(n[1].is_nan());
+        assert_eq!(n[2], 4.0);
+    }
+
+    #[test]
+    fn normalize_of_an_empty_vector_is_empty() {
+        assert!(normalize(&[]).is_empty());
+    }
+
+    #[test]
+    fn tail_capped_keeps_a_string_of_exactly_the_cap() {
+        let exact = "e".repeat(DETAIL_CAP_BYTES);
+        assert_eq!(tail_capped(exact.clone()), exact);
+    }
+
+    #[test]
+    fn tail_capped_drops_only_the_first_byte_at_one_past_the_cap() {
+        let over = format!("H{}", "t".repeat(DETAIL_CAP_BYTES));
+        let capped = tail_capped(over);
+        assert_eq!(capped, "t".repeat(DETAIL_CAP_BYTES));
+    }
+
+    #[test]
+    fn tail_capped_skips_a_multibyte_char_straddling_the_cut() {
+        let over = format!("中{}", "b".repeat(DETAIL_CAP_BYTES - 1));
+        assert_eq!(over.len(), DETAIL_CAP_BYTES + 2);
+        assert_eq!(tail_capped(over), "b".repeat(DETAIL_CAP_BYTES - 1));
+    }
+
+    #[test]
+    fn tail_capped_keeps_a_multibyte_char_starting_exactly_at_the_cut() {
+        let over = format!("ab中{}", "c".repeat(DETAIL_CAP_BYTES - 3));
+        assert_eq!(over.len(), DETAIL_CAP_BYTES + 2);
+        let capped = tail_capped(over);
+        assert!(capped.starts_with('中'));
+        assert_eq!(capped.len(), DETAIL_CAP_BYTES);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn providers_refuse_a_device_this_build_does_not_carry_naming_both_engines() {
+        for foreign in [EmbedDevice::DirectMl, EmbedDevice::CoreMl] {
+            match providers(foreign) {
+                Err(EmbedError::GpuUnavailable { detail }) => {
+                    assert!(detail.contains(foreign.label()), "{detail}");
+                    assert!(detail.contains(EmbedDevice::WebGpu.label()), "{detail}");
+                }
+                Err(other) => panic!("{foreign:?}: wrong error {other:?}"),
+                Ok(_) => panic!("{foreign:?} must be refused on Linux"),
+            }
+        }
+    }
+
+    #[test]
+    fn providers_build_one_provider_for_the_processor_and_the_compiled_device() {
+        assert_eq!(providers(EmbedDevice::Cpu).map(|p| p.len()), Ok(1));
+        assert_eq!(providers(EmbedDevice::compiled()).map(|p| p.len()), Ok(1));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn providers_refuse_the_broken_test_door() {
+        match providers(EmbedDevice::Broken) {
+            Err(EmbedError::GpuUnavailable { detail }) => assert!(detail.contains("test door")),
+            Err(other) => panic!("wrong error {other:?}"),
+            Ok(_) => panic!("the test door must always refuse"),
+        }
+    }
+
+    #[test]
+    fn the_processor_provider_is_always_available() {
+        assert_eq!(ensure_provider_available(EmbedDevice::Cpu), Ok(()));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_foreign_provider_is_unavailable() {
+        assert!(matches!(
+            ensure_provider_available(EmbedDevice::DirectMl),
+            Err(EmbedError::GpuUnavailable { .. })
+        ));
+    }
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn the_broken_test_door_is_unavailable() {
+        assert!(matches!(
+            ensure_provider_available(EmbedDevice::Broken),
+            Err(EmbedError::GpuUnavailable { .. })
+        ));
     }
 
     #[test]

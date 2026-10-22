@@ -88,6 +88,27 @@ mod tests {
     }
 
     #[test]
+    fn refuses_every_lane_that_is_not_an_embedding_provider_and_names_it() {
+        for lane in [
+            probe::Lane::Cuda,
+            probe::Lane::Vulkan,
+            probe::Lane::Metal,
+            probe::Lane::VideoToolbox,
+            probe::Lane::Nvidia,
+            probe::Lane::Vaapi,
+            probe::Lane::Qsv,
+            probe::Lane::Amf,
+        ] {
+            match EmbedDevice::try_from(lane) {
+                Err(EmbedError::GpuUnavailable { detail }) => {
+                    assert!(detail.starts_with(&format!("{lane:?} ")), "{detail}");
+                }
+                other => panic!("{lane:?} should be refused, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn labels_name_the_engine_the_build_drives() {
         assert_eq!(EmbedDevice::WebGpu.label(), "Vulkan");
         assert_eq!(EmbedDevice::DirectMl.label(), "DirectML");

@@ -151,4 +151,129 @@ mod tests {
             );
         }
     }
+
+    use crate::machine::{Vendor, vendor_of_adapters};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Barrier};
+
+    fn adapter(name: &str, device_type: wgpu::DeviceType) -> AdapterInfo {
+        AdapterInfo {
+            name: name.to_string(),
+            backend: wgpu::Backend::Vulkan.into(),
+            device_type: device_type.into(),
+        }
+    }
+
+    #[test]
+    fn every_real_backend_keeps_its_own_name_and_only_noop_is_other() {
+        let real = [
+            wgpu::Backend::Vulkan,
+            wgpu::Backend::Metal,
+            wgpu::Backend::Dx12,
+            wgpu::Backend::Gl,
+            wgpu::Backend::BrowserWebGpu,
+        ]
+        .map(Backend::from);
+        for (i, backend) in real.iter().enumerate() {
+            assert_ne!(*backend, Backend::Other, "{backend:?}");
+            assert!(!real[i + 1..].contains(backend), "{backend:?} twice");
+        }
+        assert_eq!(Backend::from(wgpu::Backend::Noop), Backend::Other);
+    }
+
+    #[test]
+    fn a_software_adapter_never_names_a_vendor_whatever_it_is_called() {
+        let adapters = [adapter("NVIDIA GeForce RTX 4090", wgpu::DeviceType::Cpu)];
+        assert_eq!(vendor_of_adapters(&adapters), Vendor::None);
+    }
+
+    #[test]
+    fn only_a_discrete_adapter_outranks_the_others() {
+        for other in [
+            wgpu::DeviceType::IntegratedGpu,
+            wgpu::DeviceType::VirtualGpu,
+            wgpu::DeviceType::Other,
+        ] {
+            let adapters = [
+                adapter("Intel(R) Iris Xe", other),
+                adapter("AMD Radeon RX 6600", wgpu::DeviceType::DiscreteGpu),
+            ];
+            assert_eq!(vendor_of_adapters(&adapters), Vendor::Amd, "{other:?}");
+
+            let swapped = [
+                adapter("AMD Radeon RX 6600", other),
+                adapter("Intel(R) Iris Xe", wgpu::DeviceType::IntegratedGpu),
+            ];
+            assert_eq!(vendor_of_adapters(&swapped), Vendor::Amd, "{other:?}");
+        }
+    }
+
+    #[test]
+    fn integrated_virtual_and_other_adapters_still_name_a_vendor_alone() {
+        for kind in [
+            wgpu::DeviceType::IntegratedGpu,
+            wgpu::DeviceType::VirtualGpu,
+            wgpu::DeviceType::Other,
+            wgpu::DeviceType::DiscreteGpu,
+        ] {
+            let adapters = [
+                adapter("llvmpipe (LLVM)", wgpu::DeviceType::Cpu),
+                adapter("Intel(R) Arc(TM) A380", kind),
+            ];
+            assert_eq!(vendor_of_adapters(&adapters), Vendor::Intel, "{kind:?}");
+        }
+    }
+
+    #[test]
+    fn serial_vulkan_never_lets_two_callers_in_at_once() {
+        const ROUNDS: usize = 2_000;
+        let inside = Arc::new(AtomicUsize::new(0));
+        let most = Arc::new(AtomicUsize::new(0));
+        let start = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let inside = Arc::clone(&inside);
+                let most = Arc::clone(&most);
+                let start = Arc::clone(&start);
+                std::thread::spawn(move || {
+                    start.wait();
+                    for _ in 0..ROUNDS {
+                        serial_vulkan(|| {
+                            let now = inside.fetch_add(1, Ordering::SeqCst) + 1;
+                            most.fetch_max(now, Ordering::SeqCst);
+                            std::thread::yield_now();
+                            inside.fetch_sub(1, Ordering::SeqCst);
+                        });
+                    }
+                })
+            })
+            .collect();
+        for handle in handles {
+            handle.join().unwrap();
+        }
+        assert_eq!(most.load(Ordering::SeqCst), 1);
+        assert_eq!(inside.load(Ordering::SeqCst), 0);
+    }
+
+    #[test]
+    fn serial_vulkan_hands_back_the_value_and_survives_a_panicking_caller() {
+        assert_eq!(serial_vulkan(|| 41 + 1), 42);
+        let crashed =
+            std::thread::spawn(|| serial_vulkan(|| -> u8 { panic!("caller failed") })).join();
+        assert!(crashed.is_err());
+        assert_eq!(serial_vulkan(|| "still open"), "still open");
+    }
+
+    #[test]
+    fn a_card_that_can_draw_video_is_among_the_enumerated_hardware_adapters() {
+        if can_draw_video() {
+            let adapters = probe_gpu().adapters;
+            assert!(
+                adapters
+                    .iter()
+                    .any(|adapter| adapter.device_type != DeviceType::Cpu),
+                "{adapters:?}"
+            );
+        }
+    }
 }
