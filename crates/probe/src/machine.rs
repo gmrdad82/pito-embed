@@ -1,5 +1,5 @@
 use crate::accel::{Accel, probe_accel};
-use crate::gpu::{DeviceType, probe_gpu};
+use crate::gpu::{AdapterInfo, DeviceType, probe_gpu};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Os {
@@ -123,17 +123,24 @@ fn filing_lane(os: Os, vendor: Vendor) -> Lane {
     }
 }
 
-pub fn probe_machine() -> Machine {
-    let os = host_os();
-    let accel = probe_accel();
-    let vendor = match accel {
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct Lanes {
+    listening: Lane,
+    filing: Lane,
+    video: Lane,
+}
+
+fn vendor_of_accel(accel: Accel, adapters: impl FnOnce() -> Vec<AdapterInfo>) -> Vendor {
+    match accel {
         Accel::NvidiaCuda => Vendor::Nvidia,
         Accel::AppleVideoToolbox => Vendor::Apple,
         Accel::AmdVaapi => Vendor::Amd,
         Accel::IntelQsv => Vendor::Intel,
-        Accel::Cpu => vendor_of_adapters(&probe_gpu().adapters),
-    };
+        Accel::Cpu => vendor_of_adapters(&adapters()),
+    }
+}
 
+fn lanes(os: Os, vendor: Vendor) -> Lanes {
     let listening = match (os, vendor) {
         (_, Vendor::None) => Lane::Processor,
         (_, Vendor::Nvidia) => Lane::Cuda,
@@ -141,16 +148,31 @@ pub fn probe_machine() -> Machine {
         _ => Lane::Vulkan,
     };
 
-    let filing = filing_lane(os, vendor);
-
     let video = match (os, vendor) {
         (_, Vendor::None) => Lane::Processor,
         (_, Vendor::Nvidia) => Lane::Nvidia,
         (Os::MacOs, _) => Lane::VideoToolbox,
         (Os::Windows, Vendor::Amd) => Lane::Amf,
         (Os::Linux, Vendor::Amd) => Lane::Vaapi,
-        _ => Lane::Qsv,
+        (_, Vendor::Intel) => Lane::Qsv,
+        _ => Lane::Processor,
     };
+
+    Lanes {
+        listening,
+        filing: filing_lane(os, vendor),
+        video,
+    }
+}
+
+pub fn probe_machine() -> Machine {
+    let os = host_os();
+    let vendor = vendor_of_accel(probe_accel(), || probe_gpu().adapters);
+    let Lanes {
+        listening,
+        filing,
+        video,
+    } = lanes(os, vendor);
 
     Machine {
         os,
@@ -273,13 +295,17 @@ fn nvidia_vram() -> Option<u64> {
         .args(["--query-gpu=memory.total", "--format=csv,noheader,nounits"])
         .output()
         .ok()?;
-    let first = String::from_utf8_lossy(&out.stdout)
+    nvidia_vram_from(&String::from_utf8_lossy(&out.stdout))
+}
+
+fn nvidia_vram_from(stdout: &str) -> Option<u64> {
+    stdout
         .lines()
         .next()?
         .trim()
         .parse::<u64>()
-        .ok()?;
-    Some(first * 1_048_576)
+        .ok()?
+        .checked_mul(1_048_576)
 }
 
 #[cfg(target_os = "linux")]
@@ -338,7 +364,7 @@ fn vendor_of_name(name: &str) -> Vendor {
     Vendor::None
 }
 
-fn vendor_of_adapters(adapters: &[crate::gpu::AdapterInfo]) -> Vendor {
+pub(crate) fn vendor_of_adapters(adapters: &[AdapterInfo]) -> Vendor {
     let candidates = adapters
         .iter()
         .filter(|adapter| adapter.device_type != DeviceType::Cpu);
@@ -374,12 +400,15 @@ pub fn short_card(name: &str) -> String {
 }
 
 fn card_name() -> Option<String> {
-    let gpu = probe_gpu();
-    gpu.adapters
+    card_of(&probe_gpu().adapters)
+}
+
+fn card_of(adapters: &[AdapterInfo]) -> Option<String> {
+    adapters
         .iter()
         .find(|adapter| adapter.device_type == DeviceType::DiscreteGpu)
         .or_else(|| {
-            gpu.adapters
+            adapters
                 .iter()
                 .find(|adapter| adapter.device_type != DeviceType::Cpu)
         })
@@ -542,5 +571,291 @@ mod tests {
             !none.contains("unified") && !none.contains("shared"),
             "{none}"
         );
+    }
+
+    const GIB: u64 = 1_073_741_824;
+    const MIB: u64 = 1_048_576;
+
+    fn lanes_of(listening: Lane, filing: Lane, video: Lane) -> Lanes {
+        Lanes {
+            listening,
+            filing,
+            video,
+        }
+    }
+
+    #[test]
+    fn every_os_and_vendor_that_matters_gets_its_lanes() {
+        use Lane::*;
+        let table = [
+            (Os::Linux, Vendor::Nvidia, lanes_of(Cuda, WebGpu, Nvidia)),
+            (Os::Windows, Vendor::Nvidia, lanes_of(Cuda, DirectMl, Nvidia)),
+            (Os::Linux, Vendor::Amd, lanes_of(Vulkan, WebGpu, Vaapi)),
+            (Os::Windows, Vendor::Amd, lanes_of(Vulkan, DirectMl, Amf)),
+            (Os::Linux, Vendor::Intel, lanes_of(Vulkan, WebGpu, Qsv)),
+            (Os::Windows, Vendor::Intel, lanes_of(Vulkan, DirectMl, Qsv)),
+            (Os::MacOs, Vendor::Apple, lanes_of(Metal, CoreMl, VideoToolbox)),
+            (Os::MacOs, Vendor::Amd, lanes_of(Metal, CoreMl, VideoToolbox)),
+            (Os::MacOs, Vendor::Intel, lanes_of(Metal, CoreMl, VideoToolbox)),
+            (Os::Other, Vendor::Nvidia, lanes_of(Cuda, Processor, Nvidia)),
+            (Os::Other, Vendor::Intel, lanes_of(Vulkan, Processor, Qsv)),
+        ];
+        for (os, vendor, want) in table {
+            assert_eq!(lanes(os, vendor), want, "{os:?} {vendor:?}");
+        }
+    }
+
+    #[test]
+    fn no_card_runs_everything_on_the_processor_on_every_os() {
+        let all = lanes_of(Lane::Processor, Lane::Processor, Lane::Processor);
+        for os in [Os::Linux, Os::Windows, Os::MacOs, Os::Other] {
+            assert_eq!(lanes(os, Vendor::None), all, "{os:?}");
+        }
+    }
+
+    #[test]
+    fn quick_sync_is_never_offered_for_a_card_that_is_not_intel() {
+        for os in [Os::Linux, Os::Windows, Os::MacOs, Os::Other] {
+            for vendor in [Vendor::Nvidia, Vendor::Amd, Vendor::Apple, Vendor::None] {
+                assert_ne!(lanes(os, vendor).video, Lane::Qsv, "{os:?} {vendor:?}");
+            }
+        }
+        assert_eq!(lanes(Os::Linux, Vendor::Apple).video, Lane::Processor);
+        assert_eq!(lanes(Os::Other, Vendor::Amd).video, Lane::Processor);
+    }
+
+    #[test]
+    fn a_hardware_accelerator_names_the_vendor_without_enumerating_adapters() {
+        let table = [
+            (Accel::NvidiaCuda, Vendor::Nvidia),
+            (Accel::AppleVideoToolbox, Vendor::Apple),
+            (Accel::AmdVaapi, Vendor::Amd),
+            (Accel::IntelQsv, Vendor::Intel),
+        ];
+        for (accel, want) in table {
+            let vendor = vendor_of_accel(accel, || panic!("adapters enumerated for {accel:?}"));
+            assert_eq!(vendor, want);
+        }
+    }
+
+    #[test]
+    fn with_no_accelerator_the_adapters_name_the_vendor() {
+        let nvidia = vendor_of_accel(Accel::Cpu, || {
+            vec![adapter("NVIDIA GeForce RTX 3060", DeviceType::DiscreteGpu)]
+        });
+        assert_eq!(nvidia, Vendor::Nvidia);
+
+        let software = vendor_of_accel(Accel::Cpu, || {
+            vec![adapter("llvmpipe (LLVM 19.1.0, 256 bits)", DeviceType::Cpu)]
+        });
+        assert_eq!(software, Vendor::None);
+        assert_eq!(vendor_of_accel(Accel::Cpu, Vec::new), Vendor::None);
+    }
+
+    fn machine_on(os: Os, vendor: Vendor) -> Machine {
+        let Lanes {
+            listening,
+            filing,
+            video,
+        } = lanes(os, vendor);
+        Machine {
+            os,
+            release: None,
+            vendor,
+            card: None,
+            cores: 4,
+            ram_bytes: 0,
+            vram_bytes: None,
+            listening,
+            filing,
+            video,
+        }
+    }
+
+    #[test]
+    fn a_machine_is_accelerated_only_when_listening_and_video_both_leave_the_processor() {
+        assert!(machine_on(Os::Linux, Vendor::Nvidia).accelerated());
+        assert!(machine_on(Os::Linux, Vendor::Amd).accelerated());
+        assert!(machine_on(Os::Windows, Vendor::Intel).accelerated());
+        assert!(machine_on(Os::MacOs, Vendor::Apple).accelerated());
+        assert!(!machine_on(Os::Linux, Vendor::None).accelerated());
+        assert!(!machine_on(Os::Linux, Vendor::Apple).accelerated());
+
+        let mut video_on_cpu = machine_on(Os::Linux, Vendor::Amd);
+        video_on_cpu.video = Lane::Processor;
+        assert!(!video_on_cpu.accelerated());
+
+        let mut listening_on_cpu = machine_on(Os::Linux, Vendor::Amd);
+        listening_on_cpu.listening = Lane::Processor;
+        assert!(!listening_on_cpu.accelerated());
+    }
+
+    #[test]
+    fn the_headline_reads_for_every_vendor() {
+        assert_eq!(
+            machine_on(Os::Linux, Vendor::None).headline(),
+            "Linux, processor only"
+        );
+        assert_eq!(
+            machine_on(Os::Other, Vendor::None).headline(),
+            "This computer, processor only"
+        );
+        assert_eq!(
+            machine_on(Os::MacOs, Vendor::Apple).headline(),
+            "macOS on Apple Silicon"
+        );
+        assert_eq!(
+            machine_on(Os::Windows, Vendor::Nvidia).headline(),
+            "Windows with NVIDIA CUDA"
+        );
+        assert_eq!(
+            machine_on(Os::Linux, Vendor::Amd).headline(),
+            "Linux with AMD Vulkan"
+        );
+        assert_eq!(
+            machine_on(Os::Linux, Vendor::Intel).headline(),
+            "Linux with Intel Vulkan"
+        );
+        assert_eq!(
+            machine_on(Os::MacOs, Vendor::Amd).headline(),
+            "macOS with AMD Metal"
+        );
+    }
+
+    #[test]
+    fn readable_bytes_switches_to_gigabytes_at_exactly_one() {
+        assert_eq!(readable_bytes(512 * MIB), "512 MB");
+        assert_eq!(readable_bytes(1023 * MIB), "1023 MB");
+        assert_eq!(readable_bytes(0), "0 MB");
+        assert_eq!(readable_bytes(GIB), "1 GB");
+        assert_eq!(readable_bytes(GIB + GIB / 4), "1 GB");
+        assert_eq!(readable_bytes(GIB + 3 * GIB / 4), "2 GB");
+        assert_eq!(readable_bytes(24 * GIB), "24 GB");
+    }
+
+    #[test]
+    fn the_full_spec_line_reads_card_vram_cores_and_ram_in_order() {
+        let mut machine = machine_on(Os::Linux, Vendor::Nvidia);
+        machine.card = Some("NVIDIA GeForce RTX 4080".to_string());
+        machine.vram_bytes = Some(16 * GIB);
+        machine.cores = 16;
+        machine.ram_bytes = 32 * GIB;
+        assert_eq!(machine.spec_line(), "RTX 4080 · 16 GB · 16 cores · 32 GB");
+    }
+
+    #[test]
+    fn the_spec_line_drops_what_is_unknown() {
+        let machine = machine_on(Os::Linux, Vendor::Amd);
+        assert_eq!(machine.spec_line(), "4 cores");
+
+        let mut small = machine_on(Os::Linux, Vendor::None);
+        small.ram_bytes = 768 * MIB;
+        assert_eq!(small.spec_line(), "4 cores · 768 MB");
+    }
+
+    #[test]
+    fn the_title_prefers_the_release_name_and_falls_back_to_the_os() {
+        let mut machine = machine_on(Os::Linux, Vendor::Amd);
+        assert_eq!(machine.title(), "Linux system information");
+        machine.release = Some("Arch Linux".to_string());
+        assert_eq!(machine.title(), "Arch Linux system information");
+        assert_eq!(
+            machine_on(Os::Other, Vendor::None).title(),
+            "This computer system information"
+        );
+    }
+
+    #[test]
+    fn vram_is_never_guessed_for_cards_that_share_memory_or_no_card() {
+        for vendor in [Vendor::Intel, Vendor::Apple, Vendor::None] {
+            assert_eq!(vram_bytes(vendor), None, "{vendor:?}");
+        }
+    }
+
+    #[test]
+    fn nvidia_smi_output_reads_the_first_card_in_bytes() {
+        assert_eq!(nvidia_vram_from("16376\n"), Some(16376 * MIB));
+        assert_eq!(nvidia_vram_from("  8192  \n"), Some(8192 * MIB));
+        assert_eq!(nvidia_vram_from("24564\n12288\n"), Some(24564 * MIB));
+    }
+
+    #[test]
+    fn nvidia_smi_output_that_is_empty_or_garbage_is_no_number() {
+        assert_eq!(nvidia_vram_from(""), None);
+        assert_eq!(nvidia_vram_from("\n16376\n"), None);
+        assert_eq!(nvidia_vram_from("[N/A]\n"), None);
+        assert_eq!(
+            nvidia_vram_from(
+                "NVIDIA-SMI has failed because it couldn't communicate with the NVIDIA driver.\n"
+            ),
+            None
+        );
+        assert_eq!(nvidia_vram_from("-1\n"), None);
+        assert_eq!(nvidia_vram_from("16376 MiB\n"), None);
+    }
+
+    #[test]
+    fn nvidia_smi_output_too_big_to_be_bytes_is_no_number_not_an_overflow() {
+        assert_eq!(nvidia_vram_from(&format!("{}\n", u64::MAX / MIB + 1)), None);
+        assert_eq!(
+            nvidia_vram_from(&format!("{}\n", u64::MAX / MIB)),
+            Some(u64::MAX / MIB * MIB)
+        );
+    }
+
+    #[test]
+    fn every_vendor_word_names_its_vendor() {
+        let table = [
+            ("NVIDIA Quadro P2000", Vendor::Nvidia),
+            ("GeForce GTX 1080", Vendor::Nvidia),
+            ("RTX A4000", Vendor::Nvidia),
+            ("AMD Radeon RX 7900 XTX", Vendor::Amd),
+            ("Radeon Pro W6800", Vendor::Amd),
+            ("Intel(R) UHD Graphics 630", Vendor::Intel),
+            ("Arc A770", Vendor::Intel),
+            ("Apple M3 Max", Vendor::Apple),
+        ];
+        for (name, want) in table {
+            assert_eq!(vendor_of_name(name), want, "{name}");
+        }
+    }
+
+    #[test]
+    fn a_name_with_no_vendor_word_is_no_vendor() {
+        for name in [
+            "llvmpipe (LLVM 19.1.0, 256 bits)",
+            "Microsoft Basic Render Driver",
+            "SwiftShader Device (Subzero)",
+            "",
+        ] {
+            assert_eq!(vendor_of_name(name), Vendor::None, "{name}");
+        }
+    }
+
+    #[test]
+    fn short_card_keeps_the_model_and_trims_a_name_of_only_vendor_words() {
+        assert_eq!(short_card("Intel(R) Arc(TM) A770 Graphics"), "Arc(TM) A770");
+        assert_eq!(short_card("  NVIDIA   GPU  "), "NVIDIA   GPU");
+        assert_eq!(short_card("nvidia geforce rtx 3060"), "rtx 3060");
+        assert_eq!(short_card(""), "");
+    }
+
+    #[test]
+    fn the_card_name_prefers_the_discrete_adapter_then_any_real_one() {
+        let both = [
+            adapter("Intel(R) UHD Graphics 770", DeviceType::IntegratedGpu),
+            adapter("AMD Radeon RX 7800 XT", DeviceType::DiscreteGpu),
+        ];
+        assert_eq!(card_of(&both).as_deref(), Some("AMD Radeon RX 7800 XT"));
+
+        let fallback = [
+            adapter("llvmpipe (LLVM)", DeviceType::Cpu),
+            adapter("Virtio GPU", DeviceType::VirtualGpu),
+        ];
+        assert_eq!(card_of(&fallback).as_deref(), Some("Virtio GPU"));
+
+        let software = [adapter("llvmpipe (LLVM)", DeviceType::Cpu)];
+        assert_eq!(card_of(&software), None);
+        assert_eq!(card_of(&[]), None);
     }
 }
