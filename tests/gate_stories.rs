@@ -100,6 +100,7 @@ impl Bench {
             &bin.join("curl"),
             "#!/bin/sh\n\
              printf '%s\\n' \"$*\" >> \"$STUB_CURL_LOG\"\n\
+             if [ -n \"${STUB_RACE-}\" ]; then mkdir -p \"$STUB_RACE\"; printf theirs > \"$STUB_RACE/${STUB_RACE_FILE:-libonnxruntime.a}\"; fi\n\
              if [ -z \"$STUB_ARCHIVE\" ]; then echo 'curl: (6) Could not resolve host: example.invalid' >&2; exit 6; fi\n\
              out=''\n\
              while [ $# -gt 0 ]; do if [ \"$1\" = -o ]; then out=$2; shift; fi; shift; done\n\
@@ -110,7 +111,7 @@ impl Bench {
         std::fs::write(pkg.join("Cargo.toml"), "").expect("fake manifest is writable");
         let id = "registry+https://github.com/rust-lang/crates.io-index#ort-sys@2.0.0-rc.13";
         let metadata = format!(
-            r#"{{"packages":[{{"name":"embed","version":"1.0.4","id":"path+file:///w#embed@1.0.4","manifest_path":"/w/Cargo.toml"}},{{"name":"ort-sys","version":"2.0.0-rc.13","id":"{id}","manifest_path":"{}"}}],"resolve":{{"nodes":[{{"id":"{id}","dependencies":[],"deps":[],"features":["coreml","directml","webgpu"]}}],"root":"path+file:///w#embed@1.0.4"}},"version":1}}"#,
+            r#"{{"packages":[{{"name":"embed","version":"1.0.4","id":"path+file:///w#embed@1.0.4","manifest_path":"/w/Cargo.toml"}},{{"name":"ort-sys","version":"2.0.0-rc.13","id":"{id}","manifest_path":"{}"}}],"resolve":{{"nodes":[{{"id":"{id}","dependencies":[],"deps":[]}}],"root":"path+file:///w#embed@1.0.4"}},"version":1}}"#,
             pkg.join("Cargo.toml").display()
         );
         std::fs::write(scratch.path().join("metadata.json"), metadata)
@@ -246,24 +247,23 @@ fn online(steps: &[&str], net: &str) -> Vec<String> {
     steps.iter().map(|s| format!("{net}|{s}")).collect()
 }
 
-fn offline(steps: &[&str], net: &str) -> Vec<String> {
-    steps
-        .iter()
-        .map(|s| {
-            let (models, call) = s.split_once('|').unwrap();
-            match call.split_once(' ') {
-                Some(("fmt", _)) => format!("{net}|{s}"),
-                Some(("nextest", rest)) => {
-                    format!(
-                        "unset|{models}|nextest {}",
-                        rest.replacen("run", "run --offline", 1)
-                    )
-                }
-                Some((sub, rest)) => format!("unset|{models}|{sub} --offline {rest}"),
-                None => unreachable!(),
-            }
-        })
-        .collect()
+fn fast_offline(net: &str) -> Vec<String> {
+    vec![
+        format!("{net}|models|fmt --all --check"),
+        "unset|models|clippy --offline --workspace --all-targets -- -D warnings".into(),
+        "unset|unset|nextest run --offline --workspace --no-tests=pass".into(),
+        "unset|models|test --offline --workspace --doc".into(),
+    ]
+}
+
+fn full_offline(net: &str) -> Vec<String> {
+    vec![
+        format!("{net}|models|fmt --all --check"),
+        "unset|models|clippy --offline --workspace --all-targets --locked -- -D warnings".into(),
+        "unset|models|test --offline --workspace --doc --locked".into(),
+        "unset|models|run --offline --release --locked --example search -- a hidden area".into(),
+        "unset|models|nextest run --offline --workspace --locked --no-tests=pass".into(),
+    ]
 }
 
 fn seeding_calls(net: &str, models: &str) -> Vec<String> {
@@ -272,7 +272,7 @@ fn seeding_calls(net: &str, models: &str) -> Vec<String> {
             "{net}|{models}|metadata --format-version 1 --locked --filter-platform {LINUX} --offline"
         ),
         format!(
-            "{net}|{models}|tree --offline --locked --target {LINUX} -e normal -i ort-sys --depth 0 --prefix none -f {{f}}"
+            "{net}|{models}|tree --offline --locked --workspace --target {LINUX} -e normal -i ort-sys --depth 0 --prefix none -f {{f}}"
         ),
     ]
 }
@@ -429,13 +429,13 @@ fn the_offline_gate_seeds_ort_then_runs_every_cargo_step_offline_without_the_var
         let _ = std::fs::remove_dir_all(bench.path("home"));
         let env = [("PITO_EMBED_MODELS", "models"), ("CARGO_NET_OFFLINE", net)];
         for (args, steps, green) in [
-            (&["--fast"][..], &FAST_STEPS[..], "fast gate: green"),
-            (&[], &FULL_STEPS[..], "gate: green"),
+            (&["--fast"][..], fast_offline(net), "fast gate: green"),
+            (&[], full_offline(net), "gate: green"),
         ] {
             let run = bench.run("gate", args, &env);
             assert_eq!(run.status, Some(0), "{net} {args:?}: {}", run.stderr);
             let mut expected = seeding_calls(net, "models");
-            expected.extend(offline(steps, net));
+            expected.extend(steps);
             assert_eq!(run.cargo, expected, "{net} {args:?}");
             let lines: Vec<_> = run.stdout.lines().collect();
             assert_eq!(
@@ -530,7 +530,7 @@ fn ort_cache_check_prints_the_folder_and_says_whether_it_holds_the_library() {
         [
             format!("unset|unset|metadata --format-version 1 --locked --filter-platform {LINUX}"),
             format!(
-                "unset|unset|tree --locked --target {LINUX} -e normal -i ort-sys --depth 0 --prefix none -f {{f}}"
+                "unset|unset|tree --locked --workspace --target {LINUX} -e normal -i ort-sys --depth 0 --prefix none -f {{f}}"
             ),
         ]
     );
@@ -650,6 +650,11 @@ fn ort_cache_fetches_checks_and_extracts_the_pinned_archive_once() {
             run.curl[0]
         );
         assert!(run.curl[0].contains(" --fail "), "{}", run.curl[0]);
+        assert!(
+            run.curl[0].contains(" --connect-timeout 30 --max-time 1800 "),
+            "{}",
+            run.curl[0]
+        );
         assert!(run.curl[0].ends_with(URL), "{}", run.curl[0]);
         for lib in ["libonnxruntime.a", "libwebgpu_dawn.so"] {
             assert_eq!(std::fs::read_to_string(dest.join(lib)).unwrap(), lib);
@@ -664,9 +669,20 @@ fn ort_cache_fetches_checks_and_extracts_the_pinned_archive_once() {
     }
 }
 
-#[test]
-fn ort_cache_extracts_with_python_when_the_host_has_no_xz() {
-    let bench = Bench::new("ort-noxz-");
+fn sha256(path: &Path) -> String {
+    let out = Command::new("python3")
+        .args([
+            "-I",
+            "-c",
+            "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())",
+        ])
+        .arg(path)
+        .output()
+        .expect("python3 hashes the file");
+    String::from_utf8(out.stdout).unwrap().trim().to_string()
+}
+
+fn path_without_xz(bench: &Bench) -> Option<String> {
     let tools = bench.path("tools");
     std::fs::create_dir_all(&tools).unwrap();
     let sum = if find_tool("sha256sum").is_some() {
@@ -679,12 +695,24 @@ fn ort_cache_extracts_with_python_when_the_host_has_no_xz() {
     ] {
         let Some(found) = find_tool(tool) else {
             eprintln!("skipped: no {tool} on PATH");
-            return;
+            return None;
         };
-        std::os::unix::fs::symlink(found, tools.join(tool)).unwrap();
+        let link = tools.join(tool);
+        if !link.exists() {
+            std::os::unix::fs::symlink(found, link).unwrap();
+        }
     }
     let path = std::env::join_paths([bench.path("bin"), tools]).unwrap();
-    let run = bench.run("ort-cache", &[], &[("PATH", path.to_str().unwrap())]);
+    Some(path.to_str().unwrap().to_string())
+}
+
+#[test]
+fn ort_cache_extracts_with_python_when_the_host_has_no_xz() {
+    let bench = Bench::new("ort-noxz-");
+    let Some(path) = path_without_xz(&bench) else {
+        return;
+    };
+    let run = bench.run("ort-cache", &[], &[("PATH", &path)]);
     assert_eq!(run.status, Some(0), "{}", run.stderr);
     let dest = bench.default_dest();
     assert_eq!(
@@ -808,6 +836,14 @@ fn ort_cache_refuses_an_archive_that_is_not_flat_plain_files_and_leaves_nothing(
             &["l:libonnxruntime.a"],
             "holds 'libonnxruntime.a', which is not a plain file at the top level",
         ),
+        (
+            &["f:./lib/nested.a", "f:libonnxruntime.a"],
+            "holds './lib/nested.a', which is not a plain file at the top level",
+        ),
+        (
+            &["f:./../escape.a", "f:libonnxruntime.a"],
+            "holds './../escape.a', which is not a plain file at the top level",
+        ),
         (&["f:libwebgpu_dawn.so"], "holds no libonnxruntime.a"),
     ] {
         let hash = bench.archive(entries);
@@ -834,16 +870,7 @@ fn ort_cache_refuses_an_archive_that_is_not_flat_plain_files_and_leaves_nothing(
         );
     }
     std::fs::write(bench.path("archive.lzma2"), "not lzma2 at all").unwrap();
-    let out = Command::new("python3")
-        .args([
-            "-I",
-            "-c",
-            "import hashlib,sys;print(hashlib.sha256(open(sys.argv[1],'rb').read()).hexdigest())",
-        ])
-        .arg(bench.path("archive.lzma2"))
-        .output()
-        .unwrap();
-    let hash = String::from_utf8(out.stdout).unwrap().trim().to_string();
+    let hash = sha256(&bench.path("archive.lzma2"));
     bench.dist(&hash);
     let run = bench.run("ort-cache", &[], &[]);
     assert_eq!(run.status, Some(1));
@@ -869,8 +896,31 @@ fn ort_cache_refuses_a_cache_folder_without_the_library_instead_of_fetching() {
     assert!(run.curl.is_empty());
 }
 
+fn ort_sys_in_registry() -> Option<PathBuf> {
+    let lock =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("Cargo.lock")).ok()?;
+    let version = lock.split("[[package]]").find_map(|p| {
+        p.lines().any(|l| l == "name = \"ort-sys\"").then(|| {
+            p.lines()
+                .find_map(|l| l.strip_prefix("version = \"")?.strip_suffix('"'))
+        })?
+    })?;
+    let cargo_home = std::env::var_os("CARGO_HOME")
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".cargo")))?;
+    std::fs::read_dir(cargo_home.join("registry/src"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path().join(format!("ort-sys-{version}")))
+        .find(|p| p.join("build/download/dist.tsv").is_file())
+}
+
 #[test]
 fn ort_cache_check_on_the_real_lockfile_names_the_pinned_mac_build() {
+    if ort_sys_in_registry().is_none() {
+        eprintln!("skipped: ort-sys is not in the local registry");
+        return;
+    }
     let scratch = scratch_dir("ort-real-");
     let mut cmd = Command::new(find_tool("bash").expect("bash is on PATH"));
     cmd.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("bin/ort-cache"))
@@ -886,17 +936,103 @@ fn ort_cache_check_on_the_real_lockfile_names_the_pinned_mac_build() {
     }
     let out = cmd.output().expect("bash runs bin/ort-cache");
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if stderr.contains("cargo metadata failed")
-        || stderr.contains("cargo tree failed")
-        || stderr.contains("ort-sys packages")
-    {
-        eprintln!("skipped: ort-sys is not in the local registry: {stderr}");
-        return;
-    }
     assert_eq!(out.status.code(), Some(1), "{stderr}");
+    assert!(stderr.is_empty(), "{stderr}");
     let expected = scratch.path().join("dfbin").join(MAC).join(MAC_HASH);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),
         format!("{}\n", expected.display())
     );
+}
+
+#[test]
+fn ort_cache_accepts_entries_written_with_a_leading_dot_slash() {
+    let bench = Bench::new("ort-dotslash-");
+    let hash = bench.archive(&["f:./libonnxruntime.a", "f:libwebgpu_dawn.so"]);
+    bench.dist(&hash);
+    let dest = bench.default_dest().parent().unwrap().join(&hash);
+    let run = bench.run("ort-cache", &[], &[]);
+    assert_eq!(run.status, Some(0), "{}", run.stderr);
+    assert_eq!(run.stdout, format!("{}\n", dest.display()));
+    assert_eq!(
+        std::fs::read_to_string(dest.join("libonnxruntime.a")).unwrap(),
+        "./libonnxruntime.a"
+    );
+    assert_eq!(std::fs::read_dir(&dest).unwrap().count(), 2);
+}
+
+#[test]
+fn ort_cache_keeps_the_folder_another_process_landed_first() {
+    let bench = Bench::new("ort-race-");
+    let dest = bench.default_dest();
+    let race = [("STUB_RACE", dest.to_str().unwrap())];
+    let run = bench.run("ort-cache", &[], &race);
+    assert_eq!(run.status, Some(0), "{}", run.stderr);
+    assert_eq!(run.stdout, format!("{}\n", dest.display()));
+    assert!(run.stderr.is_empty(), "{}", run.stderr);
+    assert_eq!(
+        std::fs::read_to_string(dest.join("libonnxruntime.a")).unwrap(),
+        "theirs"
+    );
+    assert_eq!(std::fs::read_dir(&dest).unwrap().count(), 1);
+    assert_eq!(bench.leftovers(&dest), std::slice::from_ref(&bench.hash));
+}
+
+#[test]
+fn ort_cache_refuses_when_the_folder_another_process_landed_lacks_the_library() {
+    let bench = Bench::new("ort-race-bad-");
+    let dest = bench.default_dest();
+    let run = bench.run(
+        "ort-cache",
+        &[],
+        &[
+            ("STUB_RACE", dest.to_str().unwrap()),
+            ("STUB_RACE_FILE", "partial"),
+        ],
+    );
+    assert_eq!(run.status, Some(1));
+    assert!(run.stdout.is_empty(), "{}", run.stdout);
+    assert_eq!(run.stderr.lines().count(), 1, "{}", run.stderr);
+    assert!(
+        run.stderr.starts_with(&format!(
+            "bin/ort-cache: cannot move the files into {}: ",
+            dest.display()
+        )),
+        "{}",
+        run.stderr
+    );
+    assert!(!dest.join("libonnxruntime.a").exists());
+    assert_eq!(bench.leftovers(&dest), std::slice::from_ref(&bench.hash));
+}
+
+#[test]
+fn ort_cache_refuses_a_stream_cut_before_its_end_marker_with_either_decoder() {
+    let bench = Bench::new("ort-cut-");
+    let archive = bench.path("archive.lzma2");
+    let mut bytes = std::fs::read(&archive).unwrap();
+    assert_eq!(
+        bytes.pop(),
+        Some(0),
+        "raw LZMA2 ends with its 0x00 end marker"
+    );
+    std::fs::write(&archive, bytes).unwrap();
+    let hash = sha256(&archive);
+    bench.dist(&hash);
+    let dest = bench.default_dest().parent().unwrap().join(&hash);
+    let mut paths = vec![None];
+    if let Some(path) = path_without_xz(&bench) {
+        paths.push(Some(path));
+    }
+    for path in paths {
+        let env: Vec<_> = path.as_deref().map(|p| ("PATH", p)).into_iter().collect();
+        let run = bench.run("ort-cache", &[], &env);
+        assert_eq!(run.status, Some(1), "{path:?}");
+        assert_eq!(
+            run.stderr,
+            format!("bin/ort-cache: {URL} is not a raw LZMA2 stream\n"),
+            "{path:?}"
+        );
+        assert!(!dest.exists(), "{path:?}");
+        assert!(bench.leftovers(&dest).is_empty(), "{path:?}");
+    }
 }

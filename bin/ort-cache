@@ -107,7 +107,7 @@ if len(dirs) != 1:
 print(dirs[0])
 ' "$target") || exit 1
 
-features=$(cargo tree $off --locked --target "$target" -e normal -i ort-sys --depth 0 --prefix none -f '{f}') || fail "cargo tree failed for $target"
+features=$(cargo tree $off --locked --workspace --target "$target" -e normal -i ort-sys --depth 0 --prefix none -f '{f}') || fail "cargo tree failed for $target"
 
 dist=$(python3 -I -c '
 import re, sys
@@ -186,7 +186,7 @@ work=''
 trap '[ -z "$work" ] || rm -rf "$work"' EXIT
 work=$(mktemp -d "$parent/.ort-cache.XXXXXX") || fail "cannot create a temp folder in $parent"
 
-if ! msg=$(curl --proto =https --proto-redir =https --fail --silent --show-error --location --max-redirs 1 -o "$work/archive" "$url" 2>&1); then
+if ! msg=$(curl --proto =https --proto-redir =https --fail --connect-timeout 30 --max-time 1800 --silent --show-error --location --max-redirs 1 -o "$work/archive" "$url" 2>&1); then
     msg=${msg%%$'\n'*}
     fail "could not download $url: ${msg:-curl failed}"
 fi
@@ -210,9 +210,10 @@ count = 0
 try:
     with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as tar:
         for m in tar:
-            if not m.isfile() or "/" in m.name or "\\" in m.name or m.name in ("", ".", ".."):
+            name = m.name[2:] if m.name.startswith("./") else m.name
+            if not m.isfile() or "/" in name or "\\" in name or name in ("", ".", ".."):
                 refuse("holds %r, which is not a plain file at the top level" % m.name)
-            with open(os.path.join(dest, m.name), "xb") as out:
+            with open(os.path.join(dest, name), "xb") as out:
                 shutil.copyfileobj(tar.extractfile(m), out)
             count += 1
 except (tarfile.TarError, OSError, EOFError) as e:
@@ -233,6 +234,8 @@ with open(sys.argv[1], "rb") as f:
         if not chunk:
             break
         sys.stdout.buffer.write(d.decompress(chunk))
+if not d.eof:
+    sys.exit(1)
 ' "$work/archive" 2>/dev/null | python3 -I -c "$untar" "$work/files" "$url"
 fi
 codes=("${PIPESTATUS[@]}")
