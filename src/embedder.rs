@@ -196,8 +196,11 @@ fn inference_err(e: fastembed::Error) -> EmbedError {
 }
 
 fn normalize(v: &[f32]) -> Vec<f32> {
+    if v.iter().any(|x| !x.is_finite()) {
+        return v.to_vec();
+    }
     let scale = v.iter().fold(0.0_f32, |m, x| m.max(x.abs()));
-    if !(scale > 0.0 && scale.is_finite()) {
+    if scale <= 0.0 {
         return v.to_vec();
     }
     let n = v.iter().map(|x| (x / scale).powi(2)).sum::<f32>().sqrt();
@@ -297,6 +300,24 @@ mod tests {
         assert_eq!(normalize(&[0.25]), vec![1.0]);
         assert_eq!(normalize(&[-5.0]), vec![-1.0]);
         assert_eq!(normalize(&[0.0]), vec![0.0]);
+    }
+
+    #[test]
+    fn normalize_returns_a_vector_with_an_infinity_unchanged() {
+        let v = vec![f32::INFINITY, 1.0, -2.0];
+        assert_eq!(normalize(&v), v);
+        let v = vec![1.0, f32::NEG_INFINITY];
+        assert_eq!(normalize(&v), v);
+    }
+
+    #[test]
+    fn normalize_returns_a_vector_with_a_nan_unchanged_and_spreads_no_nan() {
+        let v = vec![3.0_f32, f32::NAN, 4.0];
+        let n = normalize(&v);
+        assert_eq!(n.len(), 3);
+        assert_eq!(n[0], 3.0);
+        assert!(n[1].is_nan());
+        assert_eq!(n[2], 4.0);
     }
 
     #[test]

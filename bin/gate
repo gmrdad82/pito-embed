@@ -15,7 +15,8 @@ Options:
   -h, --help  Print help
 
 Without --fast it runs the full gate: the same with --locked, the search
-example in release and the tests with PITO_EMBED_MODELS as you set it.
+example in release and the tests with the model; it needs PITO_EMBED_MODELS
+set to the model folder.
 EOF
 }
 
@@ -25,7 +26,11 @@ refuse() {
         bold=$'\e[1m' red=$'\e[1;31m' yellow=$'\e[33m' under=$'\e[1;4m' reset=$'\e[0m'
     fi
     {
-        printf "%serror:%s unexpected argument '%s%s%s' found\n" "$red" "$reset" "$yellow" "$1" "$reset"
+        if [ "$2" = repeated ]; then
+            printf "%serror:%s the argument '%s%s%s' cannot be used multiple times\n" "$red" "$reset" "$yellow" "$1" "$reset"
+        else
+            printf "%serror:%s unexpected argument '%s%s%s' found\n" "$red" "$reset" "$yellow" "$1" "$reset"
+        fi
         printf '\n'
         printf '%sUsage:%s %sbin/gate%s [--fast]\n' "$under" "$reset" "$bold" "$reset"
         printf '\n'
@@ -34,24 +39,22 @@ refuse() {
     exit 2
 }
 
+fast=0
 for arg in "$@"; do
     case "$arg" in
         -h | --help)
             usage
             exit 0
             ;;
+        --fast)
+            [ "$fast" -eq 0 ] || refuse "$arg" repeated
+            fast=1
+            ;;
+        *)
+            refuse "$arg" unexpected
+            ;;
     esac
 done
-
-fast=0
-if [ "$#" -gt 0 ]; then
-    [ "$1" = --fast ] || refuse "$1"
-    fast=1
-    shift
-fi
-if [ "$#" -gt 0 ]; then
-    refuse "$1"
-fi
 
 if [ "$fast" -eq 1 ]; then
     cargo fmt --all --check
@@ -60,6 +63,11 @@ if [ "$fast" -eq 1 ]; then
     cargo test --workspace --doc
     echo "fast gate: green"
     exit 0
+fi
+
+if [ -z "${PITO_EMBED_MODELS:-}" ]; then
+    echo "bin/gate: the full gate needs PITO_EMBED_MODELS set to the model folder" >&2
+    exit 1
 fi
 
 cargo fmt --all --check

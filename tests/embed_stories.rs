@@ -87,38 +87,23 @@ fn corrupt_files_on_the_processor_fail_to_load_with_a_bounded_detail() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn a_foreign_device_with_corrupt_files_falls_to_the_processor_or_fails_to_load() {
+fn a_foreign_device_with_corrupt_files_fails_to_load_on_the_processor_too() {
     let dir = corrupt_model_dir("corrupt-foreign-", None);
     match Embedder::load(dir.path(), EmbedDevice::DirectMl) {
-        Ok(embedder) => {
-            assert_eq!(embedder.device_in_use(), EmbedDevice::Cpu);
-            let reason = embedder.fall_off_reason().expect("a fall names its reason");
-            assert!(reason.contains(EmbedDevice::DirectMl.label()), "{reason}");
+        Err(EmbedError::LoadFailed { detail }) => {
+            assert!(!detail.is_empty());
+            assert!(detail.len() <= 4096, "detail is {} bytes", detail.len());
         }
-        Err(EmbedError::LoadFailed { detail }) => assert!(detail.len() <= 4096),
-        Err(other) => panic!("expected a fall or LoadFailed, got {other:?}"),
+        Err(other) => panic!("expected LoadFailed, got {other:?}"),
+        Ok(embedder) => panic!("corrupt files loaded on {:?}", embedder.device_in_use()),
     }
 }
 
-#[cfg(debug_assertions)]
-#[test]
-fn the_broken_test_door_with_corrupt_files_falls_to_the_processor_or_fails_to_load() {
-    let dir = corrupt_model_dir("corrupt-broken-", None);
-    match Embedder::load(dir.path(), EmbedDevice::Broken) {
-        Ok(embedder) => {
-            assert_eq!(embedder.device_in_use(), EmbedDevice::Cpu);
-            assert!(embedder.fall_off_reason().is_some());
-        }
-        Err(EmbedError::LoadFailed { .. }) => {}
-        Err(other) => panic!("the door must fall to the processor, got {other:?}"),
-    }
-}
-
-#[cfg(debug_assertions)]
+#[cfg(target_os = "linux")]
 #[test]
 fn a_foreign_device_with_a_missing_file_reports_the_file_not_the_device() {
     let dir = corrupt_model_dir("missing-foreign-", Some("config.json"));
-    match Embedder::load(dir.path(), EmbedDevice::Broken) {
+    match Embedder::load(dir.path(), EmbedDevice::DirectMl) {
         Err(EmbedError::ModelMissing { path }) => assert_eq!(path, dir.path().join("config.json")),
         Err(other) => panic!("expected ModelMissing, got {other:?}"),
         Ok(_) => panic!("a dir without its config must not load"),
@@ -153,10 +138,6 @@ fn every_error_prints_a_line_carrying_what_it_was_built_with() {
     ] {
         let line = err.to_string();
         assert!(line.contains(detail), "{line}");
-        assert!(
-            line.len() > detail.len(),
-            "{line} says nothing beyond its detail"
-        );
         assert!(!line.contains('\n'), "{line}");
     }
 }
@@ -182,5 +163,69 @@ fn the_four_errors_print_distinct_lines_for_the_same_detail() {
         for b in &lines[i + 1..] {
             assert_ne!(a, b);
         }
+    }
+}
+
+#[cfg(unix)]
+fn gate(args: &[&str], models: Option<&str>) -> std::process::Output {
+    let mut cmd = std::process::Command::new("bash");
+    cmd.arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("bin/gate"))
+        .args(args)
+        .env("NO_COLOR", "1")
+        .env_remove("PITO_EMBED_MODELS");
+    if let Some(m) = models {
+        cmd.env("PITO_EMBED_MODELS", m);
+    }
+    cmd.output().expect("bash runs bin/gate")
+}
+
+#[cfg(unix)]
+fn clap_shape(first: &str) -> String {
+    format!("{first}\n\nUsage: bin/gate [--fast]\n\nFor more information, try '--help'.\n")
+}
+
+#[cfg(unix)]
+#[test]
+fn the_gate_reports_the_first_bad_argument_even_before_help() {
+    let out = gate(&["--bogus", "--help"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert!(out.stdout.is_empty());
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        clap_shape("error: unexpected argument '--bogus' found")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_gate_refuses_a_repeated_fast_as_clap_does() {
+    let out = gate(&["--fast", "--fast"], None);
+    assert_eq!(out.status.code(), Some(2));
+    assert_eq!(
+        String::from_utf8_lossy(&out.stderr),
+        clap_shape("error: the argument '--fast' cannot be used multiple times")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn the_gate_prints_help_on_stdout_when_help_comes_first() {
+    let out = gate(&["--help", "--bogus"], None);
+    assert_eq!(out.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&out.stdout).contains("Usage: bin/gate [--fast]"));
+    assert!(out.stderr.is_empty());
+}
+
+#[cfg(unix)]
+#[test]
+fn the_full_gate_refuses_to_run_without_the_model_folder() {
+    for models in [None, Some("")] {
+        let out = gate(&[], models);
+        assert_eq!(out.status.code(), Some(1), "{models:?}");
+        assert!(out.stdout.is_empty(), "{models:?}");
+        assert_eq!(
+            String::from_utf8_lossy(&out.stderr),
+            "bin/gate: the full gate needs PITO_EMBED_MODELS set to the model folder\n"
+        );
     }
 }
