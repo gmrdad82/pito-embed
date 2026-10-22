@@ -1,17 +1,22 @@
 # Changelog
 
-## Unreleased
+## v1.0.4 — 2026-10-23
 
 ### Added
 
 - `bin/gate` runs the checks a change must pass: `--fast` for formatting, lints, the tests without the model and the doc tests; without it the full gate, locked, with the search example and the tests on the model.
+
+### Changed
+
+- GitHub Actions no longer runs on the repo; the maintainer builds, tests and publishes each release.
+- The README links the PITO MD Discord for questions.
 
 ### Fixed
 
 - `probe` no longer picks Quick Sync as the video lane on a machine without an Intel card.
 - An `nvidia-smi` that can't run (not executable, or a folder) no longer makes `probe` count the machine as NVIDIA.
 - A huge VRAM reading from `nvidia-smi` no longer overflows.
-- `normalize` keeps vectors at unit length when their values are tiny or huge.
+- Embeddings stay at unit length when their values are tiny or huge.
 - The spec line no longer starts with a stray `·` when the card's name is empty, and just under 1 GB it reads "1 GB" instead of "1024 MB".
 - A model file that is a folder or can't be read now fails to load with its path and the reason, instead of being reported as missing; a missing file is reported before the large weights file is read.
 
