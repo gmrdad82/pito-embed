@@ -85,7 +85,8 @@ mod linux {
         names
             .into_iter()
             .filter_map(|name| {
-                let contents = std::fs::read_to_string(drm.join(name).join("device/vendor")).ok()?;
+                let contents =
+                    std::fs::read_to_string(drm.join(name).join("device/vendor")).ok()?;
                 u32::from_str_radix(contents.trim().trim_start_matches("0x"), 16).ok()
             })
             .collect()
@@ -138,8 +139,8 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     mod sysfs {
-        use super::super::linux::{nvidia_smi_on_path, probe_at, render_node_vendors};
         use super::super::Accel;
+        use super::super::linux::{nvidia_smi_on_path, probe_at, render_node_vendors};
         use std::ffi::{OsStr, OsString};
         use std::os::unix::fs::PermissionsExt;
         use std::path::{Path, PathBuf};
@@ -233,9 +234,33 @@ mod tests {
             assert!(!nvidia_smi_on_path(path_of(&[&empty]).as_deref()));
             assert!(!nvidia_smi_on_path(path_of(&[&plain]).as_deref()));
             assert!(!nvidia_smi_on_path(path_of(&[&folder]).as_deref()));
-            assert!(!nvidia_smi_on_path(path_of(&[&dir.path().join("missing")]).as_deref()));
+            assert!(!nvidia_smi_on_path(
+                path_of(&[&dir.path().join("missing")]).as_deref()
+            ));
             assert!(!nvidia_smi_on_path(Some(OsStr::new(""))));
             assert!(!nvidia_smi_on_path(None));
+        }
+
+        #[test]
+        fn a_symlinked_nvidia_smi_counts_as_its_target_does() {
+            let dir = crate::testscratch::dir("accel-symlink");
+            let real = dir.path().join("real");
+            let linked = dir.path().join("linked");
+            let to_plain = dir.path().join("to-plain");
+            let dangling = dir.path().join("dangling");
+            tool(&real, "nvidia-smi", 0o755);
+            tool(&real, "plain-smi", 0o644);
+            for folder in [&linked, &to_plain, &dangling] {
+                std::fs::create_dir_all(folder).unwrap();
+            }
+            std::os::unix::fs::symlink(real.join("nvidia-smi"), linked.join("nvidia-smi")).unwrap();
+            std::os::unix::fs::symlink(real.join("plain-smi"), to_plain.join("nvidia-smi"))
+                .unwrap();
+            std::os::unix::fs::symlink(real.join("gone"), dangling.join("nvidia-smi")).unwrap();
+
+            assert!(nvidia_smi_on_path(path_of(&[&linked]).as_deref()));
+            assert!(!nvidia_smi_on_path(path_of(&[&to_plain]).as_deref()));
+            assert!(!nvidia_smi_on_path(path_of(&[&dangling]).as_deref()));
         }
 
         #[test]

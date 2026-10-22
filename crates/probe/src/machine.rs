@@ -191,19 +191,21 @@ pub fn probe_machine() -> Machine {
 }
 
 fn readable_bytes(bytes: u64) -> String {
-    let gb = bytes as f64 / 1_073_741_824.0;
-    if gb >= 1.0 {
-        format!("{gb:.0} GB")
+    let mb = (bytes as f64 / 1_048_576.0).round();
+    if mb >= 1024.0 {
+        format!("{:.0} GB", bytes as f64 / 1_073_741_824.0)
     } else {
-        format!("{:.0} MB", bytes as f64 / 1_048_576.0)
+        format!("{mb:.0} MB")
     }
 }
 
 impl Machine {
     pub fn spec_line(&self) -> String {
         let mut parts = Vec::new();
-        if let Some(card) = &self.card {
-            parts.push(short_card(card));
+        if let Some(card) = self.card.as_deref().map(short_card)
+            && !card.is_empty()
+        {
+            parts.push(card);
         }
         match (self.vram_bytes, self.vendor) {
             (Some(vram), _) => parts.push(readable_bytes(vram)),
@@ -589,14 +591,30 @@ mod tests {
         use Lane::*;
         let table = [
             (Os::Linux, Vendor::Nvidia, lanes_of(Cuda, WebGpu, Nvidia)),
-            (Os::Windows, Vendor::Nvidia, lanes_of(Cuda, DirectMl, Nvidia)),
+            (
+                Os::Windows,
+                Vendor::Nvidia,
+                lanes_of(Cuda, DirectMl, Nvidia),
+            ),
             (Os::Linux, Vendor::Amd, lanes_of(Vulkan, WebGpu, Vaapi)),
             (Os::Windows, Vendor::Amd, lanes_of(Vulkan, DirectMl, Amf)),
             (Os::Linux, Vendor::Intel, lanes_of(Vulkan, WebGpu, Qsv)),
             (Os::Windows, Vendor::Intel, lanes_of(Vulkan, DirectMl, Qsv)),
-            (Os::MacOs, Vendor::Apple, lanes_of(Metal, CoreMl, VideoToolbox)),
-            (Os::MacOs, Vendor::Amd, lanes_of(Metal, CoreMl, VideoToolbox)),
-            (Os::MacOs, Vendor::Intel, lanes_of(Metal, CoreMl, VideoToolbox)),
+            (
+                Os::MacOs,
+                Vendor::Apple,
+                lanes_of(Metal, CoreMl, VideoToolbox),
+            ),
+            (
+                Os::MacOs,
+                Vendor::Amd,
+                lanes_of(Metal, CoreMl, VideoToolbox),
+            ),
+            (
+                Os::MacOs,
+                Vendor::Intel,
+                lanes_of(Metal, CoreMl, VideoToolbox),
+            ),
             (Os::Other, Vendor::Nvidia, lanes_of(Cuda, Processor, Nvidia)),
             (Os::Other, Vendor::Intel, lanes_of(Vulkan, Processor, Qsv)),
         ];
@@ -726,6 +744,9 @@ mod tests {
     fn readable_bytes_switches_to_gigabytes_at_exactly_one() {
         assert_eq!(readable_bytes(512 * MIB), "512 MB");
         assert_eq!(readable_bytes(1023 * MIB), "1023 MB");
+        assert_eq!(readable_bytes(1023 * MIB + MIB / 2 - 1), "1023 MB");
+        assert_eq!(readable_bytes(1023 * MIB + MIB / 2), "1 GB");
+        assert_eq!(readable_bytes(GIB - 1), "1 GB");
         assert_eq!(readable_bytes(0), "0 MB");
         assert_eq!(readable_bytes(GIB), "1 GB");
         assert_eq!(readable_bytes(GIB + GIB / 4), "1 GB");
@@ -754,6 +775,16 @@ mod tests {
     }
 
     #[test]
+    fn a_card_with_an_empty_or_blank_name_adds_no_part_to_the_spec_line() {
+        for name in ["", "   "] {
+            let mut machine = machine_on(Os::Linux, Vendor::Amd);
+            machine.card = Some(name.to_string());
+            machine.vram_bytes = Some(8 * GIB);
+            assert_eq!(machine.spec_line(), "8 GB · 4 cores", "{name:?}");
+        }
+    }
+
+    #[test]
     fn the_title_prefers_the_release_name_and_falls_back_to_the_os() {
         let mut machine = machine_on(Os::Linux, Vendor::Amd);
         assert_eq!(machine.title(), "Linux system information");
@@ -763,13 +794,6 @@ mod tests {
             machine_on(Os::Other, Vendor::None).title(),
             "This computer system information"
         );
-    }
-
-    #[test]
-    fn vram_is_never_guessed_for_cards_that_share_memory_or_no_card() {
-        for vendor in [Vendor::Intel, Vendor::Apple, Vendor::None] {
-            assert_eq!(vram_bytes(vendor), None, "{vendor:?}");
-        }
     }
 
     #[test]

@@ -15,8 +15,8 @@ Options:
   -h, --help  Print help
 
 Without --fast it runs the full gate: the same with --locked, the search
-example in release and the tests with the model; it needs PITO_EMBED_MODELS
-set to the model folder.
+example in release, which fetches the model when the folder lacks it, then
+the tests with the model; it needs PITO_EMBED_MODELS set to the model folder.
 EOF
 }
 
@@ -72,7 +72,7 @@ fi
 
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo nextest run --workspace --locked --no-tests=pass
 cargo test --workspace --doc --locked
 cargo run --release --locked --example search -- a hidden area
+cargo nextest run --workspace --locked --no-tests=pass
 echo "gate: green"

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use fastembed::{
@@ -46,14 +46,26 @@ impl Embedder {
 
     fn load_on(model_dir: &Path, device: EmbedDevice) -> Result<Self, EmbedError> {
         let _webgpu = webgpu_session(device);
-        let onnx_file = read_required(&model_dir.join("onnx").join(ONNX_FILE))?;
-        let onnx_data = read_required(&model_dir.join("onnx").join(ONNX_DATA_FILE))?;
-        let tokenizer_file = read_required(&model_dir.join("tokenizer.json"))?;
-        let config_file = read_required(&model_dir.join("config.json"))?;
-        let special_tokens_map_file = read_required(&model_dir.join("special_tokens_map.json"))?;
-        let tokenizer_config_file = read_required(&model_dir.join("tokenizer_config.json"))?;
+        let [
+            onnx_path,
+            onnx_data_path,
+            tokenizer_path,
+            config_path,
+            special_tokens_map_path,
+            tokenizer_config_path,
+        ] = required_paths(model_dir);
+        for path in required_paths(model_dir) {
+            check_required(&path)?;
+        }
 
         ensure_provider_available(device)?;
+
+        let onnx_file = read_required(&onnx_path)?;
+        let onnx_data = read_required(&onnx_data_path)?;
+        let tokenizer_file = read_required(&tokenizer_path)?;
+        let config_file = read_required(&config_path)?;
+        let special_tokens_map_file = read_required(&special_tokens_map_path)?;
+        let tokenizer_config_file = read_required(&tokenizer_config_path)?;
 
         let mut model = UserDefinedEmbeddingModel::new(
             onnx_file,
@@ -140,10 +152,43 @@ fn prefixed_document(text: &str) -> String {
     format!("{DOC_PREFIX}{text}")
 }
 
+fn required_paths(model_dir: &Path) -> [PathBuf; 6] {
+    let onnx = model_dir.join("onnx");
+    [
+        onnx.join(ONNX_FILE),
+        onnx.join(ONNX_DATA_FILE),
+        model_dir.join("tokenizer.json"),
+        model_dir.join("config.json"),
+        model_dir.join("special_tokens_map.json"),
+        model_dir.join("tokenizer_config.json"),
+    ]
+}
+
+fn check_required(path: &Path) -> Result<(), EmbedError> {
+    let meta = std::fs::metadata(path).map_err(|e| required_err(path, e))?;
+    if meta.is_file() {
+        Ok(())
+    } else {
+        Err(EmbedError::LoadFailed {
+            detail: format!("{} is not a file", path.display()),
+        })
+    }
+}
+
 fn read_required(path: &Path) -> Result<Vec<u8>, EmbedError> {
-    std::fs::read(path).map_err(|_| EmbedError::ModelMissing {
-        path: path.to_path_buf(),
-    })
+    std::fs::read(path).map_err(|e| required_err(path, e))
+}
+
+fn required_err(path: &Path, e: std::io::Error) -> EmbedError {
+    if e.kind() == std::io::ErrorKind::NotFound {
+        EmbedError::ModelMissing {
+            path: path.to_path_buf(),
+        }
+    } else {
+        EmbedError::LoadFailed {
+            detail: tail_capped(format!("{}: {e}", path.display())),
+        }
+    }
 }
 
 fn providers(device: EmbedDevice) -> Result<Vec<ort::ep::ExecutionProviderDispatch>, EmbedError> {
@@ -204,7 +249,8 @@ fn normalize(v: &[f32]) -> Vec<f32> {
         return v.to_vec();
     }
     let n = v.iter().map(|x| (x / scale).powi(2)).sum::<f32>().sqrt();
-    v.iter().map(|x| x / scale / n).collect()
+    let k = 1.0 / n;
+    v.iter().map(|x| x / scale * k).collect()
 }
 
 #[cfg(test)]
@@ -293,6 +339,14 @@ mod tests {
         let v = [3e30_f32, -4e30];
         assert!((v[0] * v[0]).is_infinite());
         assert_unit_and_parallel(&v, &normalize(&v));
+    }
+
+    #[test]
+    fn normalize_reaches_unit_length_at_the_ends_of_the_f32_range() {
+        let largest = [f32::MAX, -f32::MAX, f32::MAX];
+        assert_unit_and_parallel(&largest, &normalize(&largest));
+        let smallest = [f32::from_bits(1), -f32::from_bits(1)];
+        assert_unit_and_parallel(&smallest, &normalize(&smallest));
     }
 
     #[test]
