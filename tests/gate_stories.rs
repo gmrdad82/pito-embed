@@ -82,7 +82,7 @@ impl Bench {
             "#!/bin/sh\n\
              printf '%s|%s|%s\\n' \"${CARGO_NET_OFFLINE-unset}\" \"${PITO_EMBED_MODELS-unset}\" \"$*\" >> \"$STUB_LOG\"\n\
              case \"$1\" in\n\
-             metadata) cat \"$STUB_METADATA\"; exit 0 ;;\n\
+             metadata) cat \"$STUB_METADATA\" || exit 101; exit 0 ;;\n\
              tree) printf '%s\\n' \"$STUB_FEATURES\"; exit 0 ;;\n\
              esac\n\
              if [ \"$1\" = \"${STUB_CARGO_FAIL-none}\" ]; then exit 7; fi\n\
@@ -890,6 +890,66 @@ fn ort_cache_refuses_an_archive_that_is_not_flat_plain_files_and_leaves_nothing(
     assert_eq!(run.stderr.lines().count(), 1, "{}", run.stderr);
     assert!(!dest.parent().unwrap().join(&hash).exists());
     assert!(bench.leftovers(&dest).is_empty());
+}
+
+#[test]
+fn ort_cache_refuses_a_graph_a_table_or_an_archive_it_cannot_use_in_one_line() {
+    let bench = Bench::new("ort-unusable-");
+    let dest = bench.default_dest();
+    let missing = bench.path("no-such-metadata.json");
+    let run = bench.run(
+        "ort-cache",
+        &[],
+        &[("STUB_METADATA", missing.to_str().unwrap())],
+    );
+    assert_eq!(run.status, Some(1));
+    assert!(
+        run.stderr.ends_with(&format!(
+            "bin/ort-cache: cargo metadata failed for {LINUX}\n"
+        )),
+        "{}",
+        run.stderr
+    );
+    let lonely = bench.path("lonely.json");
+    std::fs::write(
+        &lonely,
+        r#"{"packages":[{"name":"embed","manifest_path":"/w/Cargo.toml"}],"resolve":null,"version":1}"#,
+    )
+    .unwrap();
+    let run = bench.run(
+        "ort-cache",
+        &[],
+        &[("STUB_METADATA", lonely.to_str().unwrap())],
+    );
+    assert_eq!(run.status, Some(1));
+    assert_eq!(
+        run.stderr,
+        format!(
+            "bin/ort-cache: the dependency graph holds 0 ort-sys packages for {LINUX}, not one\n"
+        )
+    );
+    let table = bench.path("registry/ort-sys-2.0.0-rc.13/build/download/dist.tsv");
+    std::fs::write(&table, format!("header\n{LINUX}\twebgpu\t{URL}\n")).unwrap();
+    let run = bench.run("ort-cache", &[], &[]);
+    assert_eq!(run.status, Some(1));
+    assert_eq!(
+        run.stderr,
+        format!(
+            "bin/ort-cache: {} has a malformed row for {LINUX}\n",
+            table.display()
+        )
+    );
+    let hash = bench.archive(&[]);
+    bench.dist(&hash);
+    let run = bench.run("ort-cache", &[], &[]);
+    assert_eq!(run.status, Some(1));
+    assert_eq!(
+        run.stderr,
+        format!("bin/ort-cache: {URL} is an empty archive\n")
+    );
+    assert!(run.stdout.is_empty() && run.curl.len() == 1);
+    assert!(!dest.parent().unwrap().join(&hash).exists());
+    assert!(!bench.path("home").exists());
 }
 
 #[test]
