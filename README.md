@@ -133,6 +133,8 @@ bin/gate --fast
 
 It runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, the tests with [cargo-nextest](https://nexte.st) and the doc tests, and ends with `fast gate: green`. `bin/gate` without `--fast` is the full gate: the same, locked, plus the search example and the tests on the real model, and it needs `PITO_EMBED_MODELS` set.
 
+On a build machine where cargo must stay offline, set `CARGO_NET_OFFLINE=true`: the gate first runs `bin/ort-cache`, which downloads the ONNX Runtime build `ort` pins into `ort`'s own cache (checking its sha256) only when it isn't there, then runs every cargo step with `--offline`. `bin/ort-cache --check` prints that folder and says whether it is filled.
+
 The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to the model's folder (running the search example once fills the default one). Without it they say so and skip. The maintainer runs all of it, with the model, on Linux and macOS before every release, and the GPU paths on a machine with a GPU.
 
 ## Part of PITO MD

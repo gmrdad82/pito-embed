@@ -1,0 +1,253 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+usage() {
+    cat <<'EOF'
+Fetch the ONNX Runtime build ort-sys links into ort-sys's own cache, so a
+build without network finds it there.
+
+Usage: bin/ort-cache [OPTIONS]
+
+Options:
+      --target <TARGET>  The target to fetch for [default: the host's]
+      --check            Only print the folder; exit 1 when it lacks the library
+  -h, --help             Print help
+
+It prints the folder ort-sys reads for the target. The archive is pinned by
+ort-sys's own table and its sha256 is checked before anything is extracted.
+EOF
+}
+
+refuse() {
+    local bold='' red='' yellow='' under='' reset=''
+    if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+        bold=$'\e[1m' red=$'\e[1;31m' yellow=$'\e[33m' under=$'\e[1;4m' reset=$'\e[0m'
+    fi
+    {
+        case "$2" in
+            repeated)
+                printf "%serror:%s the argument '%s%s%s' cannot be used multiple times\n" "$red" "$reset" "$yellow" "$1" "$reset"
+                ;;
+            value)
+                printf "%serror:%s a value is required for '%s%s%s' but none was supplied\n" "$red" "$reset" "$yellow" "$1" "$reset"
+                ;;
+            *)
+                printf "%serror:%s unexpected argument '%s%s%s' found\n" "$red" "$reset" "$yellow" "$1" "$reset"
+                ;;
+        esac
+        printf '\n'
+        if [ "$2" != value ]; then
+            printf '%sUsage:%s %sbin/ort-cache%s [OPTIONS]\n' "$under" "$reset" "$bold" "$reset"
+            printf '\n'
+        fi
+        printf "For more information, try '%s--help%s'.\n" "$bold" "$reset"
+    } >&2
+    exit 2
+}
+
+fail() {
+    echo "bin/ort-cache: $*" >&2
+    exit 1
+}
+
+target=''
+target_seen=0
+check=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+        --check)
+            [ "$check" -eq 0 ] || refuse --check repeated
+            check=1
+            ;;
+        --target | --target=*)
+            [ "$target_seen" -eq 0 ] || refuse '--target <TARGET>' repeated
+            target_seen=1
+            if [ "$1" = --target ]; then
+                case "${2:-}" in
+                    '' | -*) refuse '--target <TARGET>' value ;;
+                esac
+                target=$2
+                shift
+            else
+                target=${1#--target=}
+                [ -n "$target" ] || refuse '--target <TARGET>' value
+            fi
+            ;;
+        *)
+            refuse "$1" unexpected
+            ;;
+    esac
+    shift
+done
+
+off=''
+case "$(printf '%s' "${CARGO_NET_OFFLINE:-}" | tr '[:upper:]' '[:lower:]')" in
+    1 | true) off=--offline ;;
+esac
+
+if [ -z "$target" ]; then
+    target=$(rustc -vV | sed -n 's/^host: //p')
+    [ -n "$target" ] || fail "rustc -vV names no host target"
+fi
+
+meta=$(cargo metadata --format-version 1 --locked --filter-platform "$target" $off) || fail "cargo metadata failed for $target"
+pkg=$(printf '%s' "$meta" | python3 -I -c '
+import json, os, sys
+dirs = sorted({os.path.dirname(p["manifest_path"]) for p in json.load(sys.stdin)["packages"] if p["name"] == "ort-sys"})
+if len(dirs) != 1:
+    print("bin/ort-cache: the dependency graph holds %d ort-sys packages for %s, not one" % (len(dirs), sys.argv[1]), file=sys.stderr)
+    sys.exit(1)
+print(dirs[0])
+' "$target") || exit 1
+
+features=$(cargo tree $off --locked --target "$target" -e normal -i ort-sys --depth 0 --prefix none -f '{f}') || fail "cargo tree failed for $target"
+
+dist=$(python3 -I -c '
+import re, sys
+table, target, enabled = sys.argv[1:]
+def refuse(why):
+    print("bin/ort-cache: " + why, file=sys.stderr)
+    sys.exit(1)
+accel = set("training tensorrt openvino onednn directml nnapi coreml xnnpack rocm acl armnn tvm migraphx rknpu vitis cann qnn webgpu azure nvrtx vsinpu".split())
+on = {f for f in enabled.strip().split(",") if f}
+if on & {"cuda", "tensorrt"}:
+    refuse("the cuda and tensorrt features of ort-sys are not supported")
+want = on & accel
+try:
+    lines = open(table, encoding="utf-8").read().split("\n")[1:]
+except OSError as e:
+    refuse("cannot read %s: %s" % (table, e.strerror))
+rows = [l.split("\t") for l in lines if l and not l.startswith("#")]
+rows = [r for r in rows if r[0] == target]
+if not rows:
+    refuse("no ONNX Runtime build for " + target)
+for r in rows:
+    if len(r) != 4 or not r[2].startswith("https://") or not re.fullmatch("[0-9a-f]{64}", r[3]):
+        refuse("%s has a malformed row for %s" % (table, target))
+    if (set() if r[1] == "none" else set(r[1].split(","))) == want:
+        print(r[2], r[3])
+        sys.exit(0)
+refuse("no ONNX Runtime build for %s with features %s" % (target, ",".join(sorted(want)) or "none"))
+' "$pkg/build/download/dist.tsv" "$target" "$features") || exit 1
+url=${dist% *}
+hash=${dist##* }
+
+if [ -n "${ORT_CACHE_DIR+x}" ]; then
+    case "$ORT_CACHE_DIR" in
+        /*) cache=$ORT_CACHE_DIR ;;
+        *) fail "ORT_CACHE_DIR must be an absolute path" ;;
+    esac
+else
+    home=${HOME:-}
+    [ -n "$home" ] || home=$(python3 -I -c 'import os, pwd; print(pwd.getpwuid(os.getuid()).pw_dir)')
+    [ -n "$home" ] || fail "no home folder to hold the cache"
+    os=$(uname -s)
+    case "$os" in
+        Linux)
+            case "${XDG_CACHE_HOME:-}" in
+                /*) cache=$XDG_CACHE_HOME ;;
+                *) cache=$home/.cache/ort.pyke.io ;;
+            esac
+            ;;
+        Darwin) cache=$home/Library/Caches/ort.pyke.io ;;
+        *) fail "ort-sys keeps no cache folder this script knows on $os" ;;
+    esac
+fi
+dest=$cache/dfbin/$target/$hash
+lib=libonnxruntime.a
+case "$target" in
+    *windows*) lib=onnxruntime.lib ;;
+esac
+
+if [ "$check" -eq 1 ]; then
+    echo "$dest"
+    if [ -f "$dest/$lib" ]; then
+        exit 0
+    fi
+    exit 1
+fi
+
+if [ -e "$dest" ]; then
+    [ -f "$dest/$lib" ] || fail "$dest exists without $lib; remove it to fetch again"
+    echo "$dest"
+    exit 0
+fi
+
+parent=$(dirname "$dest")
+mkdir -p "$parent" || fail "cannot create $parent"
+work=''
+trap '[ -z "$work" ] || rm -rf "$work"' EXIT
+work=$(mktemp -d "$parent/.ort-cache.XXXXXX") || fail "cannot create a temp folder in $parent"
+
+if ! msg=$(curl --proto =https --proto-redir =https --fail --silent --show-error --location --max-redirs 1 -o "$work/archive" "$url" 2>&1); then
+    msg=${msg%%$'\n'*}
+    fail "could not download $url: ${msg:-curl failed}"
+fi
+
+if command -v sha256sum >/dev/null 2>&1; then
+    sum=$(sha256sum "$work/archive")
+else
+    sum=$(shasum -a 256 "$work/archive")
+fi
+sum=${sum%% *}
+[ "$sum" = "$hash" ] || fail "$url has sha256 $sum, not the pinned $hash"
+
+mkdir "$work/files"
+untar='
+import os, shutil, sys, tarfile
+dest, url = sys.argv[1:]
+def refuse(why):
+    print("bin/ort-cache: %s %s" % (url, why), file=sys.stderr)
+    sys.exit(1)
+count = 0
+try:
+    with tarfile.open(fileobj=sys.stdin.buffer, mode="r|") as tar:
+        for m in tar:
+            if not m.isfile() or "/" in m.name or "\\" in m.name or m.name in ("", ".", ".."):
+                refuse("holds %r, which is not a plain file at the top level" % m.name)
+            with open(os.path.join(dest, m.name), "xb") as out:
+                shutil.copyfileobj(tar.extractfile(m), out)
+            count += 1
+except (tarfile.TarError, OSError, EOFError) as e:
+    refuse("is not a readable archive: %s" % e)
+if count == 0:
+    refuse("is an empty archive")
+'
+set +e
+if command -v xz >/dev/null 2>&1; then
+    xz --format=raw --lzma2=dict=64MiB -dc "$work/archive" 2>/dev/null | python3 -I -c "$untar" "$work/files" "$url"
+else
+    python3 -I -c '
+import lzma, sys
+d = lzma.LZMADecompressor(lzma.FORMAT_RAW, filters=[{"id": lzma.FILTER_LZMA2, "dict_size": 1 << 26}])
+with open(sys.argv[1], "rb") as f:
+    while True:
+        chunk = f.read(1 << 20)
+        if not chunk:
+            break
+        sys.stdout.buffer.write(d.decompress(chunk))
+' "$work/archive" 2>/dev/null | python3 -I -c "$untar" "$work/files" "$url"
+fi
+codes=("${PIPESTATUS[@]}")
+set -e
+[ "${codes[1]}" -eq 0 ] || exit 1
+[ "${codes[0]}" -eq 0 ] || fail "$url is not a raw LZMA2 stream"
+[ -f "$work/files/$lib" ] || fail "$url holds no $lib"
+
+python3 -I -c '
+import os, sys
+try:
+    os.rename(sys.argv[1], sys.argv[2])
+except OSError as e:
+    if not os.path.isfile(os.path.join(sys.argv[2], sys.argv[3])):
+        print("bin/ort-cache: cannot move the files into %s: %s" % (sys.argv[2], e.strerror), file=sys.stderr)
+        sys.exit(1)
+' "$work/files" "$dest" "$lib" || exit 1
+echo "$dest"

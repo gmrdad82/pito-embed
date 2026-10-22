@@ -17,6 +17,9 @@ Options:
 Without --fast it runs the full gate: the same with --locked, the search
 example in release, which fetches the model when the folder lacks it, then
 the tests with the model; it needs PITO_EMBED_MODELS set to the model folder.
+
+With CARGO_NET_OFFLINE set to 1 or true it first fetches ONNX Runtime into
+ort-sys's cache with bin/ort-cache, then runs cargo with --offline instead.
 EOF
 }
 
@@ -56,23 +59,41 @@ for arg in "$@"; do
     esac
 done
 
-if [ "$fast" -eq 1 ]; then
-    cargo fmt --all --check
-    cargo clippy --workspace --all-targets -- -D warnings
-    env -u PITO_EMBED_MODELS cargo nextest run --workspace --no-tests=pass
-    cargo test --workspace --doc
-    echo "fast gate: green"
-    exit 0
-fi
-
-if [ -z "${PITO_EMBED_MODELS:-}" ]; then
+if [ "$fast" -eq 0 ] && [ -z "${PITO_EMBED_MODELS:-}" ]; then
     echo "bin/gate: the full gate needs PITO_EMBED_MODELS set to the model folder" >&2
     exit 1
 fi
 
+offline=0
+off=''
+case "$(printf '%s' "${CARGO_NET_OFFLINE:-}" | tr '[:upper:]' '[:lower:]')" in
+    1 | true) offline=1 ;;
+esac
+if [ "$offline" -eq 1 ]; then
+    "$root/bin/ort-cache"
+    off=--offline
+fi
+
+step() {
+    if [ "$offline" -eq 1 ]; then
+        env -u CARGO_NET_OFFLINE "$@"
+    else
+        "$@"
+    fi
+}
+
+if [ "$fast" -eq 1 ]; then
+    cargo fmt --all --check
+    step cargo clippy $off --workspace --all-targets -- -D warnings
+    step env -u PITO_EMBED_MODELS cargo nextest run $off --workspace --no-tests=pass
+    step cargo test $off --workspace --doc
+    echo "fast gate: green"
+    exit 0
+fi
+
 cargo fmt --all --check
-cargo clippy --workspace --all-targets --locked -- -D warnings
-cargo test --workspace --doc --locked
-cargo run --release --locked --example search -- a hidden area
-cargo nextest run --workspace --locked --no-tests=pass
+step cargo clippy $off --workspace --all-targets --locked -- -D warnings
+step cargo test $off --workspace --doc --locked
+step cargo run $off --release --locked --example search -- a hidden area
+step cargo nextest run $off --workspace --locked --no-tests=pass
 echo "gate: green"
