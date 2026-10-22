@@ -42,8 +42,8 @@ It needs Rust 1.97 or newer. The build downloads ONNX Runtime's prebuilt librari
 
 ```toml
 [dependencies]
-embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.3" }
-probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.3" }
+embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.4" }
+probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.4" }
 ```
 
 ## Search by meaning
@@ -128,10 +128,10 @@ EmbeddingGemma is Google's model, provided under and subject to the [Gemma Terms
 ## Build and test
 
 ```sh
-cargo fmt --all --check
-cargo clippy --workspace --all-targets -- -D warnings
-cargo test --workspace
+bin/gate --fast
 ```
+
+It runs `cargo fmt --all --check`, `cargo clippy --workspace --all-targets -- -D warnings`, the tests with [cargo-nextest](https://nexte.st) and the doc tests, and ends with `fast gate: green`. `bin/gate` without `--fast` is the full gate: the same, locked, plus the search example and the tests on the real model, and it needs `PITO_EMBED_MODELS` set.
 
 The tests that run the real model need it on disk: set `PITO_EMBED_MODELS` to the model's folder (running the search example once fills the default one). Without it they say so and skip. The maintainer runs all of it, with the model, on Linux and macOS before every release, and the GPU paths on a machine with a GPU.
 
