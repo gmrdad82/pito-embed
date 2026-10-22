@@ -739,11 +739,7 @@ fn ort_cache_leaves_nothing_behind_on_a_wrong_hash_or_a_failed_download() {
     );
     assert!(run.stdout.is_empty());
     assert!(!wrong.exists());
-    assert!(
-        bench.leftovers(&dest).is_empty(),
-        "{:?}",
-        bench.leftovers(&dest)
-    );
+    assert!(!bench.path("home").exists(), "{:?}", bench.leftovers(&dest));
     bench.dist(&bench.hash);
     let run = bench.run("ort-cache", &[], &[("STUB_ARCHIVE", "")]);
     assert_eq!(run.status, Some(1));
@@ -755,9 +751,26 @@ fn ort_cache_leaves_nothing_behind_on_a_wrong_hash_or_a_failed_download() {
     );
     assert!(!dest.exists());
     assert!(
-        bench.leftovers(&dest).is_empty(),
-        "{:?}",
-        bench.leftovers(&dest)
+        !bench.path("home").exists(),
+        "the folders made for the fetch are removed"
+    );
+    let cache = bench.path("cache");
+    std::fs::create_dir_all(cache.join("dfbin")).unwrap();
+    let run = bench.run(
+        "ort-cache",
+        &[],
+        &[
+            ("STUB_ARCHIVE", ""),
+            ("ORT_CACHE_DIR", cache.to_str().unwrap()),
+        ],
+    );
+    assert_eq!(run.status, Some(1));
+    assert!(
+        std::fs::read_dir(cache.join("dfbin"))
+            .unwrap()
+            .next()
+            .is_none(),
+        "only the folders made for the fetch are removed"
     );
 }
 
@@ -937,7 +950,12 @@ fn ort_cache_check_on_the_real_lockfile_names_the_pinned_mac_build() {
     let out = cmd.output().expect("bash runs bin/ort-cache");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert_eq!(out.status.code(), Some(1), "{stderr}");
-    assert!(stderr.is_empty(), "{stderr}");
+    assert!(
+        stderr
+            .lines()
+            .all(|l| l.trim_start().starts_with("Blocking waiting for file lock")),
+        "{stderr}"
+    );
     let expected = scratch.path().join("dfbin").join(MAC).join(MAC_HASH);
     assert_eq!(
         String::from_utf8_lossy(&out.stdout),

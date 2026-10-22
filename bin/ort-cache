@@ -181,9 +181,25 @@ if [ -e "$dest" ]; then
 fi
 
 parent=$(dirname "$dest")
-mkdir -p "$parent" || fail "cannot create $parent"
+made=''
+d=$parent
+while [ ! -e "$d" ]; do
+    made=$d
+    d=$(dirname "$d")
+done
+landed=0
 work=''
-trap '[ -z "$work" ] || rm -rf "$work"' EXIT
+tidy() {
+    [ -z "$work" ] || rm -rf "$work"
+    [ "$landed" -eq 0 ] && [ -n "$made" ] || return 0
+    d=$parent
+    while rmdir "$d" 2>/dev/null && [ "$d" != "$made" ]; do
+        d=$(dirname "$d")
+    done
+    return 0
+}
+trap tidy EXIT
+mkdir -p "$parent" || fail "cannot create $parent"
 work=$(mktemp -d "$parent/.ort-cache.XXXXXX") || fail "cannot create a temp folder in $parent"
 
 if ! msg=$(curl --proto =https --proto-redir =https --fail --connect-timeout 30 --max-time 1800 --silent --show-error --location --max-redirs 1 -o "$work/archive" "$url" 2>&1); then
@@ -192,9 +208,9 @@ if ! msg=$(curl --proto =https --proto-redir =https --fail --connect-timeout 30 
 fi
 
 if command -v sha256sum >/dev/null 2>&1; then
-    sum=$(sha256sum "$work/archive")
+    sum=$(sha256sum <"$work/archive")
 else
-    sum=$(shasum -a 256 "$work/archive")
+    sum=$(shasum -a 256 <"$work/archive")
 fi
 sum=${sum%% *}
 [ "$sum" = "$hash" ] || fail "$url has sha256 $sum, not the pinned $hash"
