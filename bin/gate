@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+
+usage() {
+    cat <<'EOF'
+Run the checks a change must pass.
+
+Usage: bin/gate [--fast]
+
+Options:
+      --fast  fmt, clippy, the tests without the model and the doc tests
+  -h, --help  Print help
+
+Without --fast it runs the full gate: the same with --locked, the search
+example in release and the tests with PITO_EMBED_MODELS as you set it.
+EOF
+}
+
+refuse() {
+    local bold='' red='' yellow='' under='' reset=''
+    if [ -t 2 ] && [ -z "${NO_COLOR:-}" ]; then
+        bold=$'\e[1m' red=$'\e[1;31m' yellow=$'\e[33m' under=$'\e[1;4m' reset=$'\e[0m'
+    fi
+    {
+        printf "%serror:%s unexpected argument '%s%s%s' found\n" "$red" "$reset" "$yellow" "$1" "$reset"
+        printf '\n'
+        printf '%sUsage:%s %sbin/gate%s [--fast]\n' "$under" "$reset" "$bold" "$reset"
+        printf '\n'
+        printf "For more information, try '%s--help%s'.\n" "$bold" "$reset"
+    } >&2
+    exit 2
+}
+
+for arg in "$@"; do
+    case "$arg" in
+        -h | --help)
+            usage
+            exit 0
+            ;;
+    esac
+done
+
+fast=0
+if [ "$#" -gt 0 ]; then
+    [ "$1" = --fast ] || refuse "$1"
+    fast=1
+    shift
+fi
+if [ "$#" -gt 0 ]; then
+    refuse "$1"
+fi
+
+if [ "$fast" -eq 1 ]; then
+    cargo fmt --all --check
+    cargo clippy --workspace --all-targets -- -D warnings
+    env -u PITO_EMBED_MODELS cargo nextest run --workspace --no-tests=pass
+    cargo test --workspace --doc
+    echo "fast gate: green"
+    exit 0
+fi
+
+cargo fmt --all --check
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo nextest run --workspace --locked --no-tests=pass
+cargo test --workspace --doc --locked
+cargo run --release --locked --example search -- a hidden area
+echo "gate: green"
