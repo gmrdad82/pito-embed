@@ -258,7 +258,8 @@ mod tests {
     #[test]
     fn serial_vulkan_hands_back_the_value_and_survives_a_panicking_caller() {
         assert_eq!(serial_vulkan(|| 41 + 1), 42);
-        let crashed = std::thread::spawn(|| serial_vulkan(|| -> u8 { panic!("caller failed") })).join();
+        let crashed =
+            std::thread::spawn(|| serial_vulkan(|| -> u8 { panic!("caller failed") })).join();
         assert!(crashed.is_err());
         assert_eq!(serial_vulkan(|| "still open"), "still open");
     }

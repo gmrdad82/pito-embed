@@ -66,10 +66,7 @@ fn the_headline_spec_line_and_title_read_for_this_host() {
     assert!(headline.starts_with(machine.os.label()), "{headline}");
 
     let spec = machine.spec_line();
-    assert!(
-        spec.contains(&format!("{} cores", machine.cores)),
-        "{spec}"
-    );
+    assert!(spec.contains(&format!("{} cores", machine.cores)), "{spec}");
     assert!(!spec.starts_with(" · ") && !spec.ends_with(" · "), "{spec}");
 
     let title = machine.title();
