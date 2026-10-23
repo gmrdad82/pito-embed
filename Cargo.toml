@@ -1,6 +1,6 @@
 [package]
 name = "embed"
-version = "1.0.4"
+version = "1.0.5"
 edition = "2024"
 rust-version = "1.97"
 description = "On-device text embeddings for PITO MD: EmbeddingGemma-300m through fastembed-rs, on the GPU or the CPU, with no network at inference time"
