@@ -213,6 +213,17 @@ fn clap_shape(first: &str) -> String {
 }
 
 #[test]
+fn a_piped_refusal_is_plain_even_when_no_color_is_empty() {
+    let bench = Bench::new("plain-");
+    let run = bench.bin(&["--bogus"], &[("NO_COLOR", "")]);
+    assert_eq!(run.status, Some(2));
+    assert_eq!(
+        run.stderr,
+        clap_shape("error: unexpected argument '--bogus' found")
+    );
+}
+
+#[test]
 fn bad_arguments_are_refused_as_clap_does_before_cargo_runs() {
     let bench = Bench::new("args-");
     let missing = "error: a value is required for '--target <TARGET>' but none was supplied\n\nFor more information, try '--help'.\n";

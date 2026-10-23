@@ -582,6 +582,14 @@ mod tests {
     }
 
     #[test]
+    fn the_topmost_missing_folder_of_a_relative_path_is_its_first_part() {
+        assert_eq!(
+            topmost_missing(Path::new("no-such-ort-cache-root/dfbin/t")),
+            Some(PathBuf::from("no-such-ort-cache-root"))
+        );
+    }
+
+    #[test]
     fn the_network_source_names_an_https_host_it_cannot_reach() {
         let s = scratch();
         let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();

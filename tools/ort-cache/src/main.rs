@@ -16,8 +16,8 @@ fn main() -> ExitCode {
             return ExitCode::SUCCESS;
         }
         Parsed::Usage(err) => {
-            let color = std::io::stderr().is_terminal()
-                && std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty());
+            let color = std::env::var_os("NO_COLOR").is_none_or(|v| v.is_empty())
+                && std::io::stderr().is_terminal();
             eprint!("{}", err.render(color));
             return ExitCode::from(2);
         }
