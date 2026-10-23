@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.6 — 2026-10-23
+
+### Changed
+
+- pito-fetch is pinned at v1.0.3: the search example's download progress now reaches 100% even when a file downloads in under 100 ms.
+- The README's install lines point at v1.0.6.
+
 ## v1.0.5 — 2026-10-23
 
 ### Changed

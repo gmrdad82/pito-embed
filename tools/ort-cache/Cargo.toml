@@ -1,6 +1,6 @@
 [package]
 name = "ort-cache"
-version = "1.0.5"
+version = "1.0.6"
 edition = "2024"
 rust-version = "1.97"
 description = "Fetch the ONNX Runtime build ort-sys links into ort-sys's own cache, so a build without network finds it there"
