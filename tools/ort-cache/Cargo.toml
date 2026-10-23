@@ -1,0 +1,17 @@
+[package]
+name = "ort-cache"
+version = "1.0.4"
+edition = "2024"
+rust-version = "1.97"
+description = "Fetch the ONNX Runtime build ort-sys links into ort-sys's own cache, so a build without network finds it there"
+license = "MIT"
+publish = false
+
+[dependencies]
+fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.2" }
+lzma-rust2 = { version = "0.15", default-features = false, features = ["std", "optimization"] }
+serde_json = "1"
+
+[dev-dependencies]
+lzma-rust2 = { version = "0.15", default-features = false, features = ["std", "optimization", "encoder"] }
+tempfile = "3"

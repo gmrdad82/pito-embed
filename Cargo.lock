@@ -1182,6 +1182,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "ort-cache"
+version = "1.0.4"
+dependencies = [
+ "fetch",
+ "lzma-rust2",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "ort-sys"
 version = "2.0.0-rc.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
