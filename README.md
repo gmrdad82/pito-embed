@@ -42,8 +42,8 @@ It needs Rust 1.97 or newer. The build downloads ONNX Runtime's prebuilt librari
 
 ```toml
 [dependencies]
-embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.4" }
-probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.4" }
+embed = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.5" }
+probe = { git = "https://github.com/gmrdad82/pito-embed.git", tag = "v1.0.5" }
 ```
 
 ## Search by meaning
