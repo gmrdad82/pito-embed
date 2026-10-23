@@ -15,7 +15,7 @@ members = ["crates/probe", "tools/ort-cache"]
 
 [dependencies]
 fastembed = { version = "=5.17.4", default-features = false }
-fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.2" }
+fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.3" }
 probe = { path = "crates/probe" }
 thiserror = "2"
 

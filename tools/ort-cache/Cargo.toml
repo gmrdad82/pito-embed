@@ -8,7 +8,7 @@ license = "MIT"
 publish = false
 
 [dependencies]
-fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.2" }
+fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.3" }
 lzma-rust2 = { version = "0.15", default-features = false, features = ["std", "optimization"] }
 serde_json = "1"
 

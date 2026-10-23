@@ -28,7 +28,7 @@ Pass that folder to `Embedder::load`.
 Each catalog entry is a `fetch::FetchSpec` from [pito-fetch](https://docs.pitomd.com/pito-fetch/): the file's `url`, its `sha256`, its `size_hint` in bytes and its `dest_rel`, a path that starts with `models/embeddinggemma-300m-q4/`. Strip that prefix to get where the file goes inside the model folder. `examples/search.rs` does it with pito-fetch, which resumes a broken download and checks the hash. Add it next to `embed`:
 
 ```toml
-fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.2" }
+fetch = { git = "https://github.com/gmrdad82/pito-fetch.git", tag = "v1.0.3" }
 ```
 
 Then:
