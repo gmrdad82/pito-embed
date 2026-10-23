@@ -5,7 +5,7 @@
 ### Added
 
 - `bin/gate` runs the checks a change must pass: `--fast` for formatting, lints, the tests without the model and the doc tests; without it the full gate, locked, with the search example and the tests on the model.
-- `bin/ort-cache` fetches the pinned, hash-checked ONNX Runtime build into the cache `ort` reads, and `bin/gate` runs it first when `CARGO_NET_OFFLINE` is set, so the gate builds and links on a machine where cargo stays offline.
+- `bin/ort-cache` fetches the pinned, hash-checked ONNX Runtime build into the cache `ort` reads, and `bin/gate` runs it first when `CARGO_NET_OFFLINE` is set to true, so the gate builds and links on a machine where cargo stays offline.
 
 ### Changed
 
