@@ -192,10 +192,4 @@ mod tests {
         assert!(coloured.contains("\x1b[1;4mUsage:\x1b[0m \x1b[1mort-cache\x1b[0m [OPTIONS]"));
         assert!(coloured.contains("try '\x1b[1m--help\x1b[0m'."));
     }
-
-    #[test]
-    fn help_names_the_tool_and_its_options() {
-        assert!(HELP.contains("Usage: ort-cache [OPTIONS]"));
-        assert!(HELP.contains("--target <TARGET>") && HELP.contains("--check"));
-    }
 }

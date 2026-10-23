@@ -355,6 +355,27 @@ fn a_target_or_feature_set_with_no_build_is_refused_in_one_line() {
 }
 
 #[test]
+fn a_host_rustc_cannot_name_or_a_failed_cargo_tree_is_refused_in_one_line() {
+    let bench = Bench::new("hostless-");
+    std::fs::write(bench.path("host"), "").unwrap();
+    let run = bench.bin(&["--check"], &[]);
+    assert_eq!(run.status, Some(1));
+    assert_eq!(run.stderr, "ort-cache: rustc -vV names no host target\n");
+    assert!(run.stdout.is_empty() && run.cargo.is_empty());
+    std::fs::write(bench.path("host"), LINUX).unwrap();
+    std::fs::remove_file(bench.path("features")).unwrap();
+    let run = bench.bin(&["--check"], &[]);
+    assert_eq!(run.status, Some(1));
+    assert!(
+        run.stderr
+            .ends_with(&format!("ort-cache: cargo tree failed for {LINUX}\n")),
+        "{}",
+        run.stderr
+    );
+    assert!(run.stdout.is_empty());
+}
+
+#[test]
 fn a_graph_a_table_or_a_cache_setting_it_cannot_use_is_refused_in_one_line() {
     let bench = Bench::new("unusable-");
     std::fs::rename(bench.path("metadata.json"), bench.path("gone.json")).unwrap();

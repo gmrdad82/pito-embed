@@ -225,6 +225,9 @@ mod tests {
             ("d:lib", "lib"),
             ("l:libonnxruntime.a", "libonnxruntime.a"),
             ("h:libonnxruntime.a", "libonnxruntime.a"),
+            ("x:PaxHeaders/a", "PaxHeaders/a"),
+            ("x:pax", "pax"),
+            ("L:././@LongLink", "././@LongLink"),
         ] {
             let (got, dir) = run(&fixture::tar(&[spec, "f:after"]));
             match got {
@@ -324,6 +327,32 @@ mod tests {
             extract(&mut Broken, dir.path()),
             Err(TarError::Read(_))
         ));
+    }
+
+    #[test]
+    fn an_interrupted_read_is_retried() {
+        struct Once<'a> {
+            data: &'a [u8],
+            interrupted: bool,
+        }
+        impl Read for Once<'_> {
+            fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+                if !self.interrupted {
+                    self.interrupted = true;
+                    return Err(io::ErrorKind::Interrupted.into());
+                }
+                self.data.read(buf)
+            }
+        }
+        let dir = scratch();
+        let tar = fixture::tar(&["f:a"]);
+        let mut reader = Once {
+            data: &tar,
+            interrupted: false,
+        };
+        assert_eq!(extract(&mut reader, dir.path()).unwrap(), 1);
+        assert!(reader.interrupted);
+        assert_eq!(std::fs::read(dir.path().join("a")).unwrap(), b"a");
     }
 
     #[test]

@@ -10,7 +10,11 @@ pub enum Os {
 
 impl Os {
     pub fn current() -> Self {
-        match std::env::consts::OS {
+        Self::from_name(std::env::consts::OS)
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        match name {
             "linux" => Os::Linux,
             "macos" => Os::Macos,
             other => Os::Other(other.to_string()),
@@ -168,7 +172,10 @@ mod tests {
     }
 
     #[test]
-    fn the_current_os_is_linux_or_macos_here() {
-        assert!(matches!(Os::current(), Os::Linux | Os::Macos));
+    fn the_os_comes_from_its_rust_name() {
+        assert_eq!(Os::from_name("linux"), Os::Linux);
+        assert_eq!(Os::from_name("macos"), Os::Macos);
+        assert_eq!(Os::from_name("freebsd"), Os::Other("freebsd".into()));
+        assert_eq!(Os::current(), Os::from_name(std::env::consts::OS));
     }
 }

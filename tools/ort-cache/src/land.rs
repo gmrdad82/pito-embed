@@ -16,21 +16,31 @@ pub struct Net;
 
 impl Source for Net {
     fn fetch(&self, url: &str, sha256: &str, into: &Path) -> Result<PathBuf, String> {
-        let request = fetch::Request {
-            url: url.to_string(),
-            dest_rel: "archive".to_string(),
-            sha256: sha256.to_string(),
-            size_hint: None,
-        };
-        fetch::Fetcher::new(into)
-            .fetch_request(&request, &fetch::CancelToken::new(), |_| {})
-            .map_err(|e| match e {
-                fetch::FetchError::ChecksumMismatch { expected, got } => {
-                    mismatch(url, &got, &expected)
-                }
-                e => format!("could not download {url}: {e}"),
-            })
+        if !url.starts_with("https://") {
+            return Err(format!("{url} is not an https:// URL"));
+        }
+        download(&fetch::Fetcher::new(into), url, sha256)
     }
+}
+
+fn download(fetcher: &fetch::Fetcher, url: &str, sha256: &str) -> Result<PathBuf, String> {
+    let request = fetch::Request {
+        url: url.to_string(),
+        dest_rel: "archive".to_string(),
+        sha256: sha256.to_string(),
+        size_hint: None,
+    };
+    fetcher
+        .fetch_request(&request, &fetch::CancelToken::new(), |_| {})
+        .map_err(|e| match e {
+            fetch::FetchError::ChecksumMismatch { expected, got } => mismatch(url, &got, &expected),
+            fetch::FetchError::Http { status, .. } => {
+                format!("could not download {url}: HTTP {status}")
+            }
+            fetch::FetchError::Offline { .. } => format!("could not reach {url}"),
+            fetch::FetchError::Stalled { .. } => format!("{url} stalled"),
+            e => format!("could not download {url}: {e}"),
+        })
 }
 
 fn mismatch(url: &str, got: &str, pinned: &str) -> String {
@@ -52,11 +62,9 @@ impl Drop for Tidy {
         let Some(made) = self.made.as_deref().filter(|_| !self.landed) else {
             return;
         };
-        let mut dir = self.parent.as_path();
-        while fs::remove_dir(dir).is_ok() && dir != made {
-            match dir.parent() {
-                Some(up) => dir = up,
-                None => break,
+        for dir in self.parent.ancestors() {
+            if fs::remove_dir(dir).is_err() || dir == made {
+                break;
             }
         }
     }
@@ -81,14 +89,9 @@ fn temp_dir(parent: &Path) -> io::Result<PathBuf> {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.subsec_nanos())
         .unwrap_or(0);
-    loop {
-        let n = SEQ.fetch_add(1, Ordering::Relaxed);
-        let dir = parent.join(format!(".ort-cache.{}.{nanos:x}.{n}", std::process::id()));
-        match fs::create_dir(&dir) {
-            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
-            other => return other.map(|()| dir),
-        }
-    }
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+    let dir = parent.join(format!(".ort-cache.{}.{nanos:x}.{n}", std::process::id()));
+    fs::create_dir(&dir).map(|()| dir)
 }
 
 pub fn sha256_of(path: &Path) -> io::Result<String> {
@@ -104,26 +107,12 @@ pub fn sha256_of(path: &Path) -> io::Result<String> {
     }
 }
 
-struct Tracked<R> {
-    inner: R,
-    failed: bool,
-}
-
-impl<R: Read> Read for Tracked<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.inner.read(buf).inspect_err(|_| self.failed = true)
-    }
-}
-
 pub fn unpack<R: Read>(archive: R, files: &Path, url: &str) -> Result<(), String> {
     let not_lzma2 = || format!("{url} is not a raw LZMA2 stream");
-    let mut stream = Tracked {
-        inner: lzma_rust2::Lzma2Reader::new(archive, DICT_SIZE, None),
-        failed: false,
-    };
+    let mut stream = lzma_rust2::Lzma2Reader::new(archive, DICT_SIZE, None);
     let count = match ustar::extract(&mut stream, files) {
         Ok(count) => count,
-        Err(_) if stream.failed => return Err(not_lzma2()),
+        Err(TarError::Read(_)) => return Err(not_lzma2()),
         Err(TarError::NotPlain(name)) => {
             return Err(format!(
                 "{url} holds '{name}', which is not a plain file at the top level"
@@ -133,7 +122,6 @@ pub fn unpack<R: Read>(archive: R, files: &Path, url: &str) -> Result<(), String
         Err(TarError::Corrupt(why)) => {
             return Err(format!("{url} is not a readable archive: {why}"));
         }
-        Err(TarError::Read(e)) => return Err(format!("{url} is not a readable archive: {e}")),
         Err(TarError::Write(path, e)) => return Err(format!("cannot write {path}: {e}")),
     };
     if io::copy(&mut stream, &mut io::sink()).is_err() {
@@ -445,12 +433,151 @@ mod tests {
     #[test]
     fn the_hash_is_over_the_compressed_file() {
         let s = scratch();
-        let path = s.path().join("f");
-        fs::write(&path, b"abc").unwrap();
-        assert_eq!(
-            sha256_of(&path).unwrap(),
-            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
-        );
+        let data = good();
+        let path = s.path().join("archive");
+        fs::write(&path, &data).unwrap();
+        let mut tar = Vec::new();
+        lzma_rust2::Lzma2Reader::new(&data[..], DICT_SIZE, None)
+            .read_to_end(&mut tar)
+            .unwrap();
+        assert_eq!(sha256_of(&path).unwrap(), fetch::sha256_hex(&data));
+        assert_ne!(sha256_of(&path).unwrap(), fetch::sha256_hex(&tar));
         assert!(sha256_of(&s.path().join("missing")).is_err());
+    }
+
+    #[test]
+    fn a_folder_that_cannot_be_written_names_the_file() {
+        let s = scratch();
+        let missing = s.path().join("missing");
+        let err = unpack(&fixture::lzma2(&fixture::tar(&["f:a"]))[..], &missing, URL).unwrap_err();
+        assert!(
+            err.starts_with(&format!("cannot write {}: ", missing.join("a").display())),
+            "{err}"
+        );
+    }
+
+    fn serve(responses: Vec<Vec<u8>>) -> String {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        std::thread::spawn(move || {
+            for response in responses {
+                let Ok((mut conn, _)) = listener.accept() else {
+                    return;
+                };
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while !request.ends_with(b"\r\n\r\n") && conn.read(&mut byte).unwrap_or(0) == 1 {
+                    request.push(byte[0]);
+                }
+                if response.is_empty() {
+                    let _ = conn.read(&mut byte);
+                } else {
+                    let _ = io::Write::write_all(&mut conn, &response);
+                }
+            }
+        });
+        format!("http://{addr}/ort.tar.lzma2")
+    }
+
+    fn ok(body: &[u8]) -> Vec<u8> {
+        let mut r = format!(
+            "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        )
+        .into_bytes();
+        r.extend_from_slice(body);
+        r
+    }
+
+    fn quick() -> fetch::Timings {
+        fetch::Timings {
+            connect_timeout: std::time::Duration::from_secs(5),
+            stall_timeout: std::time::Duration::from_millis(300),
+            poll_interval: std::time::Duration::from_millis(20),
+            backoff: [std::time::Duration::ZERO; 3],
+        }
+    }
+
+    #[test]
+    fn the_download_lands_the_pinned_bytes() {
+        let s = scratch();
+        let data = good();
+        let url = serve(vec![ok(&data)]);
+        let got = download(
+            &fetch::Fetcher::new(s.path()),
+            &url,
+            &fetch::sha256_hex(&data),
+        )
+        .unwrap();
+        assert_eq!(got, s.path().join("archive"));
+        assert_eq!(fs::read(&got).unwrap(), data);
+    }
+
+    #[test]
+    fn a_download_with_other_bytes_is_a_mismatch_and_keeps_nothing() {
+        let s = scratch();
+        let data = good();
+        let url = serve(vec![ok(b"other bytes")]);
+        let pinned = fetch::sha256_hex(&data);
+        let err = download(&fetch::Fetcher::new(s.path()), &url, &pinned).unwrap_err();
+        assert_eq!(
+            err,
+            format!(
+                "{url} has sha256 {}, not the pinned {pinned}",
+                fetch::sha256_hex(b"other bytes")
+            )
+        );
+        assert!(entries(s.path()).is_empty());
+    }
+
+    #[test]
+    fn a_refused_download_names_the_http_status_once() {
+        let s = scratch();
+        let url = serve(vec![
+            b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
+        ]);
+        let err = download(&fetch::Fetcher::new(s.path()), &url, &"a".repeat(64)).unwrap_err();
+        assert_eq!(err, format!("could not download {url}: HTTP 404"));
+    }
+
+    #[test]
+    fn an_unreachable_or_silent_server_is_named_plainly() {
+        let s = scratch();
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}/ort", closed.local_addr().unwrap());
+        drop(closed);
+        let fetcher = fetch::Fetcher::with_timings(s.path(), quick());
+        assert_eq!(
+            download(&fetcher, &url, &"a".repeat(64)).unwrap_err(),
+            format!("could not reach {url}")
+        );
+        let url = serve(vec![Vec::new()]);
+        assert_eq!(
+            download(&fetcher, &url, &"a".repeat(64)).unwrap_err(),
+            format!("{url} stalled")
+        );
+    }
+
+    #[test]
+    fn a_download_into_a_file_is_an_io_error() {
+        let s = scratch();
+        let file = s.path().join("file");
+        fs::write(&file, b"").unwrap();
+        let fetcher = fetch::Fetcher::with_timings(file.join("sub"), quick());
+        let err = download(&fetcher, "http://127.0.0.1:9/ort", &"a".repeat(64)).unwrap_err();
+        assert!(
+            err.starts_with("could not download http://127.0.0.1:9/ort: io error at "),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn the_network_source_takes_https_only() {
+        let s = scratch();
+        let err = Net
+            .fetch("http://127.0.0.1:9/ort", &"a".repeat(64), s.path())
+            .unwrap_err();
+        assert_eq!(err, "http://127.0.0.1:9/ort is not an https:// URL");
+        assert!(entries(s.path()).is_empty());
     }
 }

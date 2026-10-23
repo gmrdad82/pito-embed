@@ -39,6 +39,8 @@ pub fn tar(specs: &[&str]) -> Vec<u8> {
                 "d" => entry(&format!("{name}/"), b'5', b"", ""),
                 "l" => entry(name, b'2', b"", "/etc/passwd"),
                 "h" => entry(name, b'1', b"", "other"),
+                "x" => entry(name, b'x', b"", ""),
+                "L" => entry(name, b'L', b"", ""),
                 _ => entry(name, b'0', name.as_bytes(), ""),
             }
         })
