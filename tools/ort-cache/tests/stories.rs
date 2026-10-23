@@ -143,9 +143,19 @@ impl Bench {
     }
 
     fn default_dest(&self) -> PathBuf {
-        self.path("home/.cache/ort.pyke.io/dfbin")
-            .join(LINUX)
-            .join(&self.hash)
+        self.dest_on(&Os::Linux)
+    }
+
+    fn host_dest(&self) -> PathBuf {
+        self.dest_on(&Os::current())
+    }
+
+    fn dest_on(&self, os: &Os) -> PathBuf {
+        let root = match os {
+            Os::Macos => "home/Library/Caches/ort.pyke.io",
+            _ => "home/.cache/ort.pyke.io",
+        };
+        self.path(root).join("dfbin").join(LINUX).join(&self.hash)
     }
 
     fn cargo_log(&self) -> Vec<String> {
@@ -265,7 +275,7 @@ fn bad_arguments_are_refused_as_clap_does_before_cargo_runs() {
 #[test]
 fn check_prints_the_folder_and_says_whether_it_holds_the_library() {
     let bench = Bench::new("check-");
-    let dest = bench.default_dest();
+    let dest = bench.host_dest();
     let run = bench.bin(&["--check"], &[]);
     assert_eq!(run.status, Some(1), "{}", run.stderr);
     assert_eq!(run.stdout, format!("{}\n", dest.display()));
@@ -293,7 +303,7 @@ fn check_prints_the_folder_and_says_whether_it_holds_the_library() {
 #[test]
 fn an_existing_cache_is_printed_and_nothing_is_fetched() {
     let bench = Bench::new("existing-");
-    let dest = bench.default_dest();
+    let dest = bench.host_dest();
     std::fs::create_dir_all(&dest).unwrap();
     std::fs::write(dest.join("libonnxruntime.a"), "seeded").unwrap();
     let run = bench.bin(&[], &[]);
@@ -305,8 +315,12 @@ fn an_existing_cache_is_printed_and_nothing_is_fetched() {
         "seeded"
     );
     let source = Bytes::new(&bench.archive);
+    let host = Inputs {
+        os: Os::current(),
+        ..bench.inputs(bench.home())
+    };
     assert_eq!(
-        bench.lib(&source, bench.home()).unwrap(),
+        ort_cache::run(&Options::default(), &host, &source).unwrap(),
         Outcome::Ready(dest)
     );
     assert_eq!(source.calls.get(), 0);
@@ -315,7 +329,7 @@ fn an_existing_cache_is_printed_and_nothing_is_fetched() {
 #[test]
 fn a_cache_folder_without_the_library_is_refused_instead_of_fetched() {
     let bench = Bench::new("hollow-");
-    let dest = bench.default_dest();
+    let dest = bench.host_dest();
     std::fs::create_dir_all(&dest).unwrap();
     let run = bench.bin(&[], &[]);
     assert_eq!(run.status, Some(1));
