@@ -11,7 +11,7 @@ readme = "README.md"
 publish = false
 
 [workspace]
-members = ["crates/probe"]
+members = ["crates/probe", "tools/ort-cache"]
 
 [dependencies]
 fastembed = { version = "=5.17.4", default-features = false }

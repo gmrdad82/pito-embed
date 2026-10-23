@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- The ONNX Runtime cache helper is now `ort-cache`, a Rust tool in the workspace (`cargo run -p ort-cache -- --check`), and needs no Python or xz; `bin/gate` runs it when `CARGO_NET_OFFLINE` is set to true.
+
 ## v1.0.4 — 2026-10-23
 
 ### Added

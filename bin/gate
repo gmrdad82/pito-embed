@@ -19,7 +19,8 @@ example in release, which fetches the model when the folder lacks it, then
 the tests with the model; it needs PITO_EMBED_MODELS set to the model folder.
 
 With CARGO_NET_OFFLINE set to 1 or true it first fetches ONNX Runtime into
-ort-sys's cache with bin/ort-cache, then runs cargo with --offline instead.
+ort-sys's cache with the workspace's ort-cache tool, then runs cargo with
+--offline instead.
 EOF
 }
 
@@ -70,7 +71,7 @@ case "$(printf '%s' "${CARGO_NET_OFFLINE:-}" | tr '[:upper:]' '[:lower:]')" in
     1 | true) offline=1 ;;
 esac
 if [ "$offline" -eq 1 ]; then
-    "$root/bin/ort-cache"
+    cargo run -q --locked --offline -p ort-cache --
     off=--offline
 fi
 
