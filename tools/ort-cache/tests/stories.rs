@@ -164,6 +164,7 @@ impl Bench {
             .env("RUSTC", self.path("bin/rustc"))
             .env("HOME", self.path("home"))
             .env("NO_COLOR", "1");
+        keep_profile(&mut cmd);
         for (k, v) in env {
             cmd.env(k, v);
         }
@@ -628,8 +629,13 @@ fn check_on_the_real_lockfile_names_the_pinned_mac_build() {
             cmd.env(keep, v);
         }
     }
+    keep_profile(&mut cmd);
     let out = cmd.output().expect("the binary runs");
     let stderr = String::from_utf8_lossy(&out.stderr);
+    if stderr.contains("--offline was specified") {
+        eprintln!("skipped: the offline registry lacks a crate of the macOS graph");
+        return;
+    }
     assert_eq!(out.status.code(), Some(1), "{stderr}");
     assert!(
         stderr
@@ -642,4 +648,12 @@ fn check_on_the_real_lockfile_names_the_pinned_mac_build() {
         String::from_utf8_lossy(&out.stdout),
         format!("{}\n", expected.display())
     );
+}
+
+fn keep_profile(cmd: &mut Command) {
+    for keep in ["LLVM_PROFILE_FILE", "CARGO_LLVM_COV_TARGET_DIR"] {
+        if let Some(v) = std::env::var_os(keep) {
+            cmd.env(keep, v);
+        }
+    }
 }

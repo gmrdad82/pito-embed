@@ -580,4 +580,15 @@ mod tests {
         assert_eq!(err, "http://127.0.0.1:9/ort is not an https:// URL");
         assert!(entries(s.path()).is_empty());
     }
+
+    #[test]
+    fn the_network_source_names_an_https_host_it_cannot_reach() {
+        let s = scratch();
+        let closed = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("https://{}/ort", closed.local_addr().unwrap());
+        drop(closed);
+        let err = Net.fetch(&url, &"a".repeat(64), s.path()).unwrap_err();
+        assert_eq!(err, format!("could not reach {url}"));
+        assert!(entries(s.path()).is_empty());
+    }
 }
